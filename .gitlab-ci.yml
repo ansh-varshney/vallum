@@ -69,7 +69,7 @@ flows-sync:
   extends: [.python, .gcp]
   rules:
     - <<: *if_release
-      changes: [.gitlab/duo/flows/**/*]
+      changes: [.gitlab/duo/flows/**/*, vallum/flows/**/*]
     - <<: *if_ops
       when: manual
   needs:
