@@ -23,7 +23,7 @@ class GitLab:
         headers = {"User-Agent": "vallum"}
         if token:
             headers["PRIVATE-TOKEN"] = token
-        self.http = httpx.Client(headers=headers, timeout=30)
+        self.http = httpx.Client(headers=headers, timeout=httpx.Timeout(60, connect=15))
 
     @classmethod
     def from_env(cls, require_token: bool = False) -> "GitLab":
@@ -43,10 +43,19 @@ class GitLab:
         return self.api + path
 
     def request(self, method: str, path: str, *, params=None, json=None, data=None, ok=(200, 201, 202, 204), raw=False):
-        for attempt in range(4):
-            resp = self.http.request(method, self._url(path), params=params, json=json, data=data)
-            if resp.status_code in (429, 502, 503, 504) and attempt < 3:
-                time.sleep(2 * (attempt + 1))
+        attempts = 5
+        for attempt in range(attempts):
+            last = attempt == attempts - 1
+            try:
+                resp = self.http.request(method, self._url(path), params=params, json=json, data=data)
+            except httpx.TransportError:
+                # timeouts and dropped connections: GitLab's API is sometimes slow; try again
+                if last:
+                    raise
+                time.sleep(3 * (attempt + 1))
+                continue
+            if resp.status_code in (429, 500, 502, 503, 504) and not last:
+                time.sleep(3 * (attempt + 1))
                 continue
             break
         if resp.status_code not in ok:
