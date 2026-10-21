@@ -2,6 +2,7 @@
 project, remember each flow's bot account, and start flows through the Flows API from main jobs.
 
 Registry (state store): vallum_flows/<key> = {item_id, consumer_id, service_account, definition_sha, ...}.
+Runs in the flows-sync job whenever a flow's YAML or this code changes on main.
 """
 
 import hashlib
