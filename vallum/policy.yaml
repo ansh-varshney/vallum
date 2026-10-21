@@ -40,7 +40,7 @@ protected_paths:
 core_paths: [app/main.py, app/store.py, app/security.py]   # touching these makes a change Core
 
 gate:
-  agent_verdicts_required: false   # rule 9; Layer 2 switches this on when the Reviewer and Inspector exist
+  agent_verdicts_required: true    # rule 9: Reviewer approves and the Inspector says "matches" (Layer 2)
   yellow_max_changed_lines: 200
 
 provenance:

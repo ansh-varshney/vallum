@@ -56,6 +56,9 @@ class GateContext:
     author_access: int | None = None           # None: couldn't check here
     author_is_bot: bool | None = None
     changed_lines: int | None = None
+    added_files: list = field(default_factory=list)
+    learned_writer: bool = False               # author is the Incident Commander's bot (may ADD learned promises)
+    fingerprint: str | None = None             # the MR's own changes, stable across rebases
     deploy_service_text: str | None = None     # deploy/service.yaml on the branch, if changed
     rebased: bool | None = None
     pipeline_ok: bool | None = None
@@ -64,6 +67,7 @@ class GateContext:
     security_findings: list | None = None      # vulnerabilities from this pipeline's scans
     security_baseline: list | None = None      # vulnerabilities already on main
     reviewer_verdict: str | None = None
+    reviewer_author: str | None = None
     inspector: dict | None = None
     claims: list = field(default_factory=list)
     claim_results: dict = field(default_factory=dict)
@@ -179,6 +183,8 @@ def rule5(ctx: GateContext) -> Rule:
         return Rule(5, FAIL, "; ".join(caps))
     if not hits:
         return Rule(5, PASS, "no protected path changed")
+    if ctx.learned_writer and all(f.startswith("promises/learned/") and f in ctx.added_files for f in hits):
+        return Rule(5, PASS, f"Incident Commander adds learned promise(s) only: {', '.join(hits[:3])}")
     if ctx.by_owner:
         return Rule(5, PASS, f"owner change to protected paths, recorded: {', '.join(hits[:4])}")
     return Rule(5, FAIL, f"protected paths changed by @{ctx.author.get('username')}: {', '.join(hits[:5])}")
@@ -232,12 +238,16 @@ def rule8(ctx: GateContext) -> Rule:
 def rule9(ctx: GateContext) -> Rule:
     if not ctx.policy.get("gate", {}).get("agent_verdicts_required", False):
         return Rule(9, WAIVED, "Reviewer and Inspector arrive in Layer 2 (policy: agent_verdicts_required=false)")
+    if ctx.mode == "report":
+        return Rule(9, DEFERRED, "the Merge Desk collects the Reviewer's and the Inspector's verdicts")
     if ctx.reviewer_verdict != "approve":
         return Rule(9, FAIL, f"Reviewer verdict is {ctx.reviewer_verdict or 'missing'}")
     insp = ctx.inspector or {}
-    if insp.get("verdict") != "matches" or insp.get("sha") != ctx.sha:
+    same_change = insp.get("sha") == ctx.sha or (ctx.fingerprint and insp.get("fingerprint") == ctx.fingerprint)
+    if insp.get("verdict") != "matches" or not same_change:
         return Rule(9, FAIL, f"Inspector verdict is {insp.get('verdict', 'missing')} for {str(insp.get('sha'))[:8]}")
-    return Rule(9, PASS, "Reviewer approves; Inspector says matches on this commit")
+    how = "this commit" if insp.get("sha") == ctx.sha else "these exact changes (rebased since)"
+    return Rule(9, PASS, f"Reviewer @{ctx.reviewer_author or '?'} approves; Inspector says matches on {how}")
 
 
 def rule10(ctx: GateContext) -> Rule:

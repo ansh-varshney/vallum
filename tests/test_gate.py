@@ -38,7 +38,8 @@ def ctx(author=OWNER, files=("app/features/version.py", "promises/features/5-ver
                 author=author, changed_files=list(files), main_cards=main, branch_cards=branch, sha="abc",
                 author_access=40, author_is_bot=False, changed_lines=40, rebased=True, pipeline_ok=True,
                 pipeline_sha="abc", checker=GOOD_CHECKER, security_findings=[], modes={}, safe_mode=False,
-                queue_head=True, caps_ok=True)
+                queue_head=True, caps_ok=True, reviewer_verdict="approve", reviewer_author="ai-vallum-ship",
+                inspector={"verdict": "matches", "sha": "abc", "fingerprint": "f1"}, fingerprint="f1")
     base.update(kw)
     return rules.GateContext(**base)
 
@@ -52,13 +53,13 @@ def test_good_mr_passes_all_twelve():
     assert report["ok"], rules.render(report)
     assert report["score"] == "12/12"
     assert report["tier"] == "standard"
-    assert statuses(report)[9] == "waived"
+    assert statuses(report)[9] == "pass"
 
 
 def test_report_mode_defers_but_passes():
     report = rules.evaluate(ctx(mode="report", author_access=None, pipeline_ok=None, modes=None, queue_head=None, caps_ok=None))
     assert report["ok"]
-    assert report["deferred"] == [1, 6, 11, 12]
+    assert report["deferred"] == [1, 6, 9, 11, 12]
 
 
 def test_desk_mode_needs_every_rule():

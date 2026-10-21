@@ -17,12 +17,13 @@ from pathlib import Path
 
 from simulate.visitors import Visitors, ensure_links, plan_rates
 from vallum import cards as cardlib
-from vallum import config, gcp
+from vallum import config, evidence, gcp
 from vallum.checker import core
 from vallum.checker.measure import parse_measure
 from vallum.config import iso, utcnow
 from vallum.drive import judge
 from vallum.drive.cloudrun import CloudRun, DeployFailed
+from vallum.flows import Flows
 from vallum.gitlab import GitLab
 from vallum.notify import Notifier
 from vallum.state import Abort, Store
@@ -93,6 +94,37 @@ class Drive:
         record.update(fields)
         self.store.save_release(release_id, record)
         (REPORTS / f"audit-{release_id}.json").write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
+
+    def issue_of(self, mr_iid) -> int | None:
+        if not mr_iid:
+            return None
+        try:
+            return evidence.related_issue(self.gl.mr(int(mr_iid)).get("description"))
+        except Exception:
+            return None
+
+    def start_agent(self, key: str, goal: dict, issue_id=None):
+        """Agents think after code acts: a failure here never changes the release outcome."""
+        try:
+            started = Flows(self.gl, self.store).start(key, goal, issue_id=issue_id)
+            self.store.event("agent", f"{goal.get('release_id')}: started {key} session {started.get('id')}")
+            log(f"started {key} flow: session {started.get('id')}")
+        except Exception as exc:
+            log(f"could not start the {key} flow: {exc}")
+
+    def gitlab_release(self, info: dict, new_rev: str, kept: list[str]):
+        rid = info["release_id"]
+        lines = [f"**{info.get('title')}** · tier {info.get('tier')} · revision `{new_rev}`", "",
+                 f"Promises kept in the test drive: {len(kept)}", ""]
+        lines += [f"- `{k}`" for k in kept[:30]]
+        lines += ["", f"Steps: {' → '.join(str(s['step']) + '%' for s in self.report['steps'])} → 100%",
+                  "", "_Written by code from the release record._"]
+        try:
+            self.gl.post("/projects/:id/releases", json={
+                "tag_name": rid, "ref": info["commit"], "name": f"{rid}: {info.get('title')}",
+                "description": "\n".join(lines)})
+        except Exception as exc:
+            log(f"could not create the GitLab release: {exc}")
 
     # ---------------------------------------------------------------- the release
     def identify(self) -> dict:
@@ -288,6 +320,26 @@ class Drive:
                    revision=new_rev, owner_notified=bool(mr_iid))
         self.store.event("released", f"{rid} {info.get('feature')} released" + (" (first deploy)" if first else ""),
                          release_id=rid)
+        kept = sorted({f"{r.get('feature')}/{r.get('id')}" for st in self.report["steps"] for r in st.get("rows", [])
+                       if r.get("verdict") == "kept"})
+        self.gitlab_release(info, new_rev, kept)
+        issue_iid = self.issue_of(mr_iid)
+        if mr_iid and not first:
+            started = None
+            if issue_iid:
+                try:
+                    started = self.gl.get(f"/projects/:id/issues/{issue_iid}").get("created_at")
+                except Exception:
+                    started = None
+            minutes = round((utcnow() - config.parse_iso(started)).total_seconds() / 60, 1) if started else None
+            server = os.environ.get("CI_SERVER_URL", "https://gitlab.com")
+            self.start_agent("release", {
+                "release_id": rid, "title": info.get("title"), "feature": info.get("feature"), "tier": info.get("tier"),
+                "revision": new_rev, "merge_request_iid": mr_iid, "issue_iid": issue_iid,
+                "merge_request_url": f"{server}/{os.environ.get('CI_PROJECT_PATH', '')}/-/merge_requests/{mr_iid}",
+                "pipeline_url": os.environ.get("CI_PIPELINE_URL"), "promises_kept": kept,
+                "test_drive": ["step 0"] + [f"{s['step']}%" for s in self.report["steps"] if s["step"]] + ["100%"],
+                "issue_to_live_minutes": minutes, "human_actions": 0}, issue_id=issue_iid)
         self.status(mr_iid, "Released 100%", "done", note=new_rev,
                     now=f"Live for everyone. [Open the app]({self.url}/status).", action="nothing.")
         if mr_iid:
@@ -350,6 +402,14 @@ class Drive:
                 log(f"could not open the incident issue: {exc}")
         self.store.event("rolled_back", f"{rid} rolled back at {pct}%: {reason[:120]}", release_id=rid,
                          incident=incident and incident["iid"])
+        if incident:
+            broken = [r for r in rows if r.get("verdict") in (judge.BROKEN, judge.AT_RISK)][:5]
+            self.start_agent("incident", {
+                "release_id": rid, "incident_iid": incident["iid"], "step_percent": pct, "verdict": verdict,
+                "broken_promises": broken, "merge_request_iid": mr_iid, "issue_iid": self.issue_of(mr_iid),
+                "bad_revision": new_rev, "good_revision": old_rev, "rollback_seconds": round(took, 1),
+                "tier": info.get("tier"), "feature": info.get("feature"), "title": info.get("title")},
+                issue_id=incident["iid"])
         self.status(mr_iid, f"{pct}%", "failed", note=w.get("id", verdict))
         self.status(mr_iid, "Rolled back", "rolled_back", note=f"{took:.0f} s",
                     now=f"Rolled back: {reason}." + (f" Incident #{incident['iid']} is open." if incident else ""),

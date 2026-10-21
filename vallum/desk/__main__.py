@@ -12,8 +12,9 @@ import sys
 import time
 from datetime import timedelta
 
-from vallum import config, priority
-from vallum.config import iso, utcnow
+from vallum import config, evidence, priority, verdicts
+from vallum.config import iso, parse_iso, utcnow
+from vallum.flows import Flows
 from vallum.gate import context, rules
 from vallum.gitlab import GitLab, GitLabError
 from vallum.notify import Notifier
@@ -29,6 +30,7 @@ class Desk:
         self.store = store
         self.pol = pol
         self.notify = Notifier(gl, store, pol)
+        self.flows = Flows(gl, store)
 
     def log(self, msg: str):
         print(f"[merge-desk {utcnow().strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -129,10 +131,114 @@ class Desk:
                 raise
         raise last
 
+    # ------------------------------------------------------------------ agents (Layer 2)
+    def runs_left(self, tl: dict) -> int:
+        cap = int(self.pol["releases"]["max_flow_runs_per_issue"])
+        return cap - int(tl.get("flow_runs", 0))
+
+    def kick(self, mr: dict, kind: str, key: str, goal, fp: str) -> bool:
+        """Start a flow for this MR unless one is already running for the same change."""
+        target = f"{MR}-{mr['iid']}"
+        tl = self.store.timeline(target)
+        sess = (tl.get("sessions") or {}).get(kind) or {}
+        started = parse_iso(sess.get("at"))
+        wait_min = float(self.pol["watchdog"]["deadlines_min"].get("reviewing", 15))
+        if sess.get("fp") == fp and started and utcnow() - started < timedelta(minutes=wait_min):
+            self.log(f"!{mr['iid']}: {kind} session {sess.get('id')} still running")
+            return False
+        if self.runs_left(tl) <= 0:
+            self.log(f"!{mr['iid']}: flow-run cap reached")
+            self.store.set_timeline(target, refused_sha=mr["sha"])
+            self.gl.mr_labels(mr["iid"], add=[self.pol.label("needs_human")])
+            self.notify.status(MR, mr["iid"], kind.capitalize(), "failed", note="cap reached",
+                               now=f"Vallum ran {self.pol['releases']['max_flow_runs_per_issue']} agent sessions on this without a verdict.",
+                               action="look at the sessions and decide (label vallum::needs-human).")
+            return False
+        try:
+            started = self.flows.start(key, goal)
+        except Exception as exc:
+            self.log(f"!{mr['iid']}: could not start {kind}: {exc}")
+            return False
+        sessions = dict(tl.get("sessions") or {})
+        sessions[kind] = {"id": started.get("id"), "fp": fp, "at": iso(), "sha": mr["sha"]}
+        self.store.set_timeline(target, sessions=sessions, flow_runs=int(tl.get("flow_runs", 0)) + 1)
+        self.store.event("agent", f"!{mr['iid']}: started {kind} session {started.get('id')}", mr_iid=mr["iid"])
+        self.log(f"!{mr['iid']}: started {kind} session {started.get('id')}")
+        return True
+
+    def agent_verdicts(self, mr: dict) -> dict | None:
+        """Make sure the Reviewer and Inspector have spoken on this change; start them if not.
+        Returns the verdicts when both exist, None while waiting (FR-INSP-4: a new change needs a new inspection)."""
+        if not self.pol.get("gate", {}).get("agent_verdicts_required"):
+            return {}
+        iid = mr["iid"]
+        found = verdicts.latest(self.gl.notes(MR, iid), self.flows.bots())
+        fp = evidence.fingerprint(self.gl.mr_changes(iid))
+        if not found.get("review"):
+            age = utcnow() - (parse_iso(mr.get("created_at")) or utcnow())
+            if age < timedelta(minutes=8):
+                self.log(f"!{iid}: young MR; giving the Ship flow's Reviewer time to post")
+                return None
+            goal = {"door": "B", "mode": "review", "merge_request_iid": iid,
+                    "why": "The Merge Desk found no Reviewer verdict on this merge request."}
+            if self.kick(mr, "review", "ship", goal, fp):
+                self.notify.status(MR, iid, "Review", "running", now="The Reviewer is reviewing this merge request.")
+            return None
+        self.notify.status(MR, iid, "Review", "done", note=found["review"].get("verdict", "?"))
+        insp = found.get("inspector")
+        if insp and (insp.get("sha") == mr["sha"] or insp.get("fingerprint") == fp):
+            self.notify.status(MR, iid, "Inspector", "done" if insp.get("verdict") == "matches" else "failed",
+                               note=insp.get("verdict", "?"))
+            return found
+        checker, findings, jobs = context.pipeline_facts(self.gl, mr)
+        bundle = evidence.build(self.gl, mr, checker, jobs, findings)
+        if self.kick(mr, "inspector", "inspect", evidence.as_goal(bundle), fp):
+            self.notify.status(MR, iid, "Inspector", "running",
+                               now="The Inspector is checking the work against the request, from code-built evidence only.")
+        return None
+
+    def send_medic(self, mr: dict):
+        """A Vallum MR whose pipeline failed: the Pipeline Medic gets at most 2 attempts (B19)."""
+        target = f"{MR}-{mr['iid']}"
+        tl = self.store.timeline(target)
+        if tl.get("medic_sha") == mr["sha"]:
+            return  # already handled for this commit
+        attempts = int(tl.get("medic_attempts", 0))
+        cap = int(self.pol["releases"]["max_fix_attempts"])
+        hp = mr.get("head_pipeline") or {}
+        if attempts >= cap or not self.pol.get("gate", {}).get("agent_verdicts_required"):
+            self.store.set_timeline(target, medic_sha=mr["sha"], blocked_sha=mr["sha"])
+            self.gl.mr_labels(mr["iid"], add=[self.pol.label("blocked"), self.pol.label("needs_human")],
+                              remove=[self.pol.label("ready")])
+            self.notify.status(MR, mr["iid"], "Checks", "failed", note=mr["sha"][:8], title=mr["title"],
+                               now=f"The MR pipeline failed and the Pipeline Medic already had {attempts} attempt(s).",
+                               action="look at the failing job; Vallum stopped retrying (cap reached).")
+            return
+        goal = {"merge_request_iid": mr["iid"], "source_branch": mr.get("source_branch"), "sha": mr["sha"],
+                "pipeline_id": hp.get("id"), "attempt": attempts + 1, "max_attempts": cap}
+        try:
+            started = self.flows.start("medic", goal)
+        except Exception as exc:
+            self.log(f"!{mr['iid']}: could not start the Medic: {exc}")
+            return
+        self.store.set_timeline(target, medic_sha=mr["sha"], medic_attempts=attempts + 1)
+        self.store.event("agent", f"!{mr['iid']}: Pipeline Medic attempt {attempts + 1}", mr_iid=mr["iid"])
+        self.gl.mr_labels(mr["iid"], add=[self.pol.label("blocked")], remove=[self.pol.label("ready")])
+        self.notify.status(MR, mr["iid"], "Pipeline Medic", "running", note=f"attempt {attempts + 1} of {cap}",
+                           title=mr["title"], now=f"The pipeline failed on {mr['sha'][:8]}; the Medic is reading the job logs.",
+                           action="nothing.")
+        self.log(f"!{mr['iid']}: Pipeline Medic attempt {attempts + 1} (session {started.get('id')})")
+
     TRANSIENT = {6, 11, 12}   # stale rebase or pipeline, mode, queue: can change without a new commit
 
-    def full_check(self, mr: dict) -> dict:
+    def full_check(self, mr: dict, found: dict | None = None) -> dict:
         ctx = context.build(self.gl, mr, "desk")
+        found = found or {}
+        review, insp = found.get("review") or {}, found.get("inspector") or {}
+        ctx.reviewer_verdict, ctx.reviewer_author = review.get("verdict"), review.get("author")
+        ctx.inspector = insp or None
+        ctx.fingerprint = evidence.fingerprint(self.gl.mr_changes(mr["iid"]))
+        ctx.learned_writer = self.flows.bots().get(mr["author"]["username"]) == "incident"
         ctx.modes = self.store.doc("modes")
         ctx.safe_mode = bool(self.store.doc("meta").get("safe_mode"))
         ctx.queue_head = True
@@ -165,21 +271,14 @@ class Desk:
             self.notify.ledger()
             return 0
 
-        ready, waiting, blocked = self.classify(self.gl.open_mrs(self.pol.label("opt_in")))
+        ready, waiting, failed = self.classify(self.gl.open_mrs(self.pol.label("opt_in")))
         # an MR that failed the full check stays out of the queue until it gets a new commit
         refused = [m for m in ready if self.store.timeline(f"{MR}-{m['iid']}").get("refused_sha") == m["sha"]]
         ready = [m for m in ready if m not in refused]
-        blocked += refused
         ready.sort(key=lambda m: priority.queue_key(self.level(m), m.get("created_at")))
-        self.save_queue(ready, waiting, blocked)
-        for mr in blocked:
-            tl = self.store.timeline(f"{MR}-{mr['iid']}")
-            if tl.get("blocked_sha") != mr["sha"]:
-                self.store.set_timeline(f"{MR}-{mr['iid']}", blocked_sha=mr["sha"])
-                self.notify.status(MR, mr["iid"], "Checks", "failed", note=mr["sha"][:8], title=mr["title"],
-                                   now="The MR pipeline failed, so the Merge Desk won't pick this up yet.",
-                                   action="fix the failing job (Layer 2: the Pipeline Medic does this).")
-                self.gl.mr_labels(mr["iid"], add=[self.pol.label("blocked")], remove=[self.pol.label("ready")])
+        self.save_queue(ready, waiting, failed + refused)
+        for mr in failed:
+            self.send_medic(mr)
         for pos, mr in enumerate(ready[1:], 2):
             tl = self.store.timeline(f"{MR}-{mr['iid']}")
             if tl.get("queue_pos") != pos:
@@ -187,7 +286,7 @@ class Desk:
                 self.notify.status(MR, mr["iid"], "Queued", "waiting", note=f"position {pos}", title=mr["title"],
                                    now=f"In the release queue at position {pos}. One release at a time.")
         if not ready:
-            self.log(f"nothing ready ({len(waiting)} waiting, {len(blocked)} blocked)")
+            self.log(f"nothing ready ({len(waiting)} waiting, {len(failed)} failed, {len(refused)} refused)")
             self.notify.ledger()
             return 0
 
@@ -196,20 +295,24 @@ class Desk:
         self.log(f"next: !{iid} {head['title']}")
         self.gl.mr_labels(iid, add=[self.pol.label("ready")], remove=[self.pol.label("blocked")])
         self.notify.status(MR, iid, "Queued", "done", note="next", title=head["title"], priority=self.level(head),
-                           now="Picked up by the Merge Desk.")
+                           issue_iid=evidence.related_issue(head.get("description")), now="Picked up by the Merge Desk.")
+        found = self.agent_verdicts(head)
+        if found is None:
+            self.notify.ledger()
+            return 0
         mr = self.rebase_and_wait(head)
         if not mr:
             self.notify.ledger()
             return 0
 
-        report = self.full_check(mr)
+        report = self.full_check(mr, found)
         if not report["ok"] and self.only_stale(report):
             self.log(f"!{iid}: main moved during the check; rebasing once more")
             mr = self.rebase_and_wait(self.gl.mr(iid))
             if not mr:
                 self.notify.ledger()
                 return 0
-            report = self.full_check(mr)
+            report = self.full_check(mr, found)
         tier = report["tier"]
         if not report["ok"]:
             failed = "; ".join(f"rule {r['no']}: {r['detail']}" for r in report["rules"] if r["status"] not in ("pass", "waived"))

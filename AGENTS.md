@@ -14,3 +14,4 @@
 7. Claims must be structured and checkable: a job ID with its status, a check ID with its result,
    a finding ID with its state, or a file with a line range. Free text is never evidence.
 8. Stop at every cap in `policy.yaml` and label the work `vallum::needs-human` with what you tried.
+9. Your role's know-how is in `skills/<role>/SKILL.md`. Read it before you start.

@@ -90,6 +90,27 @@ class GitLab:
             page = int(nxt)
         return out[:limit]
 
+    def graphql(self, query: str, variables: dict | None = None) -> dict:
+        url = self.api.rsplit("/api/v4", 1)[0] + "/api/graphql"
+        for attempt in range(4):
+            try:
+                resp = self.http.post(url, json={"query": query, "variables": variables or {}})
+            except httpx.TransportError:
+                if attempt == 3:
+                    raise
+                time.sleep(3 * (attempt + 1))
+                continue
+            if resp.status_code >= 500 and attempt < 3:
+                time.sleep(3 * (attempt + 1))
+                continue
+            break
+        if resp.status_code != 200:
+            raise GitLabError(resp.status_code, "POST", "/api/graphql", resp.text)
+        body = resp.json()
+        if body.get("errors"):
+            raise GitLabError(200, "POST", "/api/graphql", str(body["errors"]))
+        return body["data"]
+
     # --- repository ------------------------------------------------------
     def file_raw(self, path: str, ref: str = "main") -> str:
         resp = self.request("GET", f"/projects/:id/repository/files/{quote(path, safe='')}/raw", params={"ref": ref}, raw=True)

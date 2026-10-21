@@ -13,15 +13,35 @@ from vallum.gitlab import GitLabError
 SCAN_JOBS = {"semgrep-sast": "gl-sast-report.json", "secret_detection": "gl-secret-detection-report.json"}
 
 
-def mr_changes(gl, iid: int) -> tuple[list[str], int, str | None]:
-    files, lines, deploy_text = [], 0, None
+def mr_changes(gl, iid: int) -> tuple[list[str], int, list[str]]:
+    """Changed paths, changed line count, and the paths of files the MR adds."""
+    files, lines, added = [], 0, []
     for d in gl.mr_changes(iid):
         for path in {d.get("new_path"), d.get("old_path")}:
             if path and path not in files:
                 files.append(path)
+        if d.get("new_file"):
+            added.append(d.get("new_path"))
         lines += sum(1 for ln in (d.get("diff") or "").splitlines()
                      if (ln.startswith("+") or ln.startswith("-")) and not ln.startswith(("+++", "---")))
-    return files, lines, deploy_text
+    return files, lines, added
+
+
+def pipeline_facts(gl, mr: dict) -> tuple[dict | None, list | None, list[dict]]:
+    """From the MR's head pipeline: the checker report, scan findings and job statuses (API, owner token)."""
+    hp = mr.get("head_pipeline") or {}
+    if not hp.get("id"):
+        return None, None, []
+    jobs = gl.pipeline_jobs(hp["id"])
+    by_name = {j["name"]: j for j in jobs}
+    checker = None
+    job = by_name.get("promise-checker")
+    if job:
+        blob = gl.job_artifact(job["id"], "reports/checker.json")
+        checker = json.loads(blob) if blob else None
+    groups = [_vulns(gl.job_artifact(by_name[name]["id"], fname)) for name, fname in SCAN_JOBS.items() if name in by_name]
+    findings = [v for g in groups if g for v in g] if any(g is not None for g in groups) else None
+    return checker, findings, jobs
 
 
 def author_facts(gl, author: dict) -> tuple[int | None, bool | None]:
@@ -58,7 +78,7 @@ def build(gl, mr: dict, mode: str, local_root: Path | None = None) -> GateContex
     pol = config.policy(gl)
     cat = config.catalog(gl)
     sha = mr["sha"]
-    files, lines, _ = mr_changes(gl, mr["iid"])
+    files, lines, added = mr_changes(gl, mr["iid"])
     access, bot = author_facts(gl, mr["author"])
     main_cards = cardlib.load_from_gitlab(gl, os.environ.get("CI_DEFAULT_BRANCH", "main"))
     branch_cards = cardlib.load_from_dir(local_root) if local_root else cardlib.load_from_gitlab(gl, sha)
@@ -79,17 +99,7 @@ def build(gl, mr: dict, mode: str, local_root: Path | None = None) -> GateContex
         hp = mr.get("head_pipeline") or {}
         pipeline_sha = hp.get("sha")
         pipeline_ok = hp.get("status") == "success"
-        if hp.get("id"):
-            jobs = {j["name"]: j for j in gl.pipeline_jobs(hp["id"])}
-            job = jobs.get("promise-checker")
-            if job:
-                blob = gl.job_artifact(job["id"], "reports/checker.json")
-                checker = json.loads(blob) if blob else None
-            groups = []
-            for name, fname in SCAN_JOBS.items():
-                if name in jobs:
-                    groups.append(_vulns(gl.job_artifact(jobs[name]["id"], fname)))
-            findings = [v for g in groups if g for v in g] if any(g is not None for g in groups) else None
+        checker, findings, _jobs = pipeline_facts(gl, mr)
 
     labels = set(mr.get("labels", []))
     priority = next((lb.split("::", 1)[1] for lb in labels if lb.startswith("priority::")), None)
@@ -101,7 +111,7 @@ def build(gl, mr: dict, mode: str, local_root: Path | None = None) -> GateContex
     return GateContext(
         mode=mode, policy=pol, catalog=cat, author=mr["author"], changed_files=files,
         main_cards=main_cards, branch_cards=branch_cards, sha=sha, author_access=access, author_is_bot=bot,
-        changed_lines=lines, deploy_service_text=deploy_text, rebased=is_rebased(gl, sha),
+        changed_lines=lines, added_files=added, deploy_service_text=deploy_text, rebased=is_rebased(gl, sha),
         pipeline_ok=pipeline_ok, pipeline_sha=pipeline_sha, checker=checker, security_findings=findings,
         priority=priority, is_fix=is_fix,
     )

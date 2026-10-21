@@ -63,6 +63,21 @@ provenance-gate:
     reports:
       dotenv: reports/provenance.env
 
+# Publishes .gitlab/duo/flows/*.yaml to the AI Catalog and enables them here (flows as code).
+flows-sync:
+  stage: gate
+  extends: [.python, .gcp]
+  rules:
+    - <<: *if_release
+      changes: [.gitlab/duo/flows/**/*]
+    - <<: *if_ops
+      when: manual
+  needs:
+    - { job: provenance-gate, optional: true }
+  allow_failure: true
+  script:
+    - python -m vallum.flows sync
+
 # ---------------------------------------------------------------- test
 unit-tests:
   stage: test

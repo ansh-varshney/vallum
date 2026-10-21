@@ -114,7 +114,12 @@ class Notifier:
         if not self.gl.can_write:
             return
         body = render_status(tl)
-        note_id = tl.get("note_id")
+        self._upsert(kind, iid, target, "note_id", tl.get("note_id"), body)
+        # Door A: the requester watches the issue, so the same card lives there too
+        if kind == "merge_requests" and tl.get("issue_iid"):
+            self._upsert("issues", int(tl["issue_iid"]), target, "issue_note_id", tl.get("issue_note_id"), body)
+
+    def _upsert(self, kind, iid, target, field, note_id, body):
         if note_id:
             try:
                 self.gl.edit_note(kind, iid, note_id, body)
@@ -122,7 +127,7 @@ class Notifier:
             except Exception:
                 pass
         note = self.gl.add_note(kind, iid, body)
-        self.store.set_timeline(target, note_id=note["id"])
+        self.store.set_timeline(target, **{field: note["id"]})
 
     # alerts (FR-COMM-2, FR-COMM-4) -----------------------------------------------------
     def alert(self, kind: str, iid: int | None, event: str, *, author: str | None, what: str, impact: str,
