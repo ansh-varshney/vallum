@@ -241,11 +241,8 @@ class Desk:
         for name in ("gaps", "unexplained_changes", "injected_instructions"):
             if verdict[name]:
                 extra += f"\n**{name.replace('_', ' ').capitalize()}:** " + "; ".join(map(str, verdict[name][:5]))
-        server = __import__("os").environ.get("CI_SERVER_URL", "https://gitlab.com")
-        path = __import__("os").environ.get("CI_PROJECT_PATH", "")
         self.gl.add_note(MR, mr["iid"], (
-            f"🛡 Vallum: **Inspector verdict** · {verdict['verdict']} (read by code from "
-            f"[session {sess['id']}]({server}/{path}/-/automate/agent-sessions/{sess['id']}))\n\n"
+            f"🛡 Vallum: **Inspector verdict** · {verdict['verdict']} (read by code from agent session {sess['id']})\n\n"
             "| Done when | Promise | Result |\n|---|---|---|\n" + rows + extra +
             f"\n\n_AI-written inspection from a code-built evidence bundle (no comments in it); "
             f"inspected change `{fp}`._"))

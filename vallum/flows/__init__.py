@@ -112,9 +112,12 @@ class Flows:
         elif reg.get("definition_sha") != sha:
             res = self.gl.graphql(UPDATE_M, {"input": {"id": item_id, "definition": text, "description": desc,
                                                        "release": True, "versionBump": "PATCH"}})["aiCatalogFlowUpdate"]
-            if res["errors"]:
+            if res["errors"] and any("because it is released" in e for e in res["errors"]):
+                action = "unchanged"  # same definition as the released version: nothing to publish
+            elif res["errors"]:
                 raise RuntimeError(f"{key}: update failed: {res['errors']}")
-            action = "updated"
+            else:
+                action = "updated"
         consumer = self.ensure_enabled(key, item_id)
         if key == "ship":
             consumer = self.ensure_door_a(consumer) or consumer
