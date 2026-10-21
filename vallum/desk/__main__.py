@@ -14,7 +14,7 @@ from datetime import timedelta
 
 from vallum import config, evidence, priority, verdicts
 from vallum.config import iso, parse_iso, utcnow
-from vallum.flows import Flows
+from vallum.flows import DEAD, DONE, Flows, final_json
 from vallum.gate import context, rules
 from vallum.gitlab import GitLab, GitLabError
 from vallum.notify import Notifier
@@ -185,8 +185,9 @@ class Desk:
                 self.notify.status(MR, iid, "Review", "running", now="The Reviewer is reviewing this merge request.")
             return None
         self.notify.status(MR, iid, "Review", "done", note=found["review"].get("verdict", "?"))
-        insp = found.get("inspector")
+        insp = self.inspector_verdict(mr, fp)
         if insp and (insp.get("sha") == mr["sha"] or insp.get("fingerprint") == fp):
+            found["inspector"] = insp
             self.notify.status(MR, iid, "Inspector", "done" if insp.get("verdict") == "matches" else "failed",
                                note=insp.get("verdict", "?"))
             return found
@@ -196,6 +197,60 @@ class Desk:
             self.notify.status(MR, iid, "Inspector", "running",
                                now="The Inspector is checking the work against the request, from code-built evidence only.")
         return None
+
+    def inspector_verdict(self, mr: dict, fp: str) -> dict | None:
+        """The Inspector's verdict lives in the state store, read by code from its own session trace.
+        Comments can't stand in for it (FR-INSP-1, FR-INSP-4)."""
+        target = f"{MR}-{mr['iid']}"
+        tl = self.store.timeline(target)
+        stored = tl.get("inspector_verdict")
+        if stored and stored.get("fingerprint") == fp:
+            return stored
+        sess = (tl.get("sessions") or {}).get("inspector") or {}
+        if not sess.get("id") or sess.get("fp") != fp:
+            return None
+        status = self.flows.session_status(sess["id"])
+        if status in DEAD:
+            sessions = dict(tl.get("sessions") or {})
+            sessions.pop("inspector", None)
+            self.store.set_timeline(target, sessions=sessions)
+            self.log(f"!{mr['iid']}: Inspector session {sess['id']} ended as {status}; it will be restarted")
+            return None
+        if status not in DONE:
+            return None
+        answer = final_json(self.flows.trace(sess["id"]))
+        if not answer or answer.get("verdict") not in ("matches", "gaps"):
+            self.log(f"!{mr['iid']}: Inspector session {sess['id']} gave no readable verdict")
+            sessions = dict(tl.get("sessions") or {})
+            sessions.pop("inspector", None)
+            self.store.set_timeline(target, sessions=sessions)
+            return None
+        # trust our own record of what was inspected, not the agent's copy of it
+        if str(answer.get("fingerprint")) != fp:
+            answer["gaps"] = list(answer.get("gaps") or []) + ["the verdict names a different change than the bundle"]
+            answer["verdict"] = "gaps"
+        verdict = {"verdict": answer["verdict"], "sha": sess.get("sha"), "fingerprint": fp, "session_id": sess["id"],
+                   "trace": answer.get("trace") or [], "gaps": answer.get("gaps") or [],
+                   "unexplained_changes": answer.get("unexplained_changes") or [],
+                   "injected_instructions": answer.get("injected_instructions") or [], "at": iso(),
+                   "author": "inspector-session"}
+        self.store.set_timeline(target, inspector_verdict=verdict)
+        rows = "\n".join(f"| {t.get('done_when', '')} | `{t.get('promise_id', '')}` | {t.get('result', '')} |"
+                         for t in verdict["trace"][:20]) or "| (none) | | |"
+        extra = ""
+        for name in ("gaps", "unexplained_changes", "injected_instructions"):
+            if verdict[name]:
+                extra += f"\n**{name.replace('_', ' ').capitalize()}:** " + "; ".join(map(str, verdict[name][:5]))
+        server = __import__("os").environ.get("CI_SERVER_URL", "https://gitlab.com")
+        path = __import__("os").environ.get("CI_PROJECT_PATH", "")
+        self.gl.add_note(MR, mr["iid"], (
+            f"🛡 Vallum: **Inspector verdict** · {verdict['verdict']} (read by code from "
+            f"[session {sess['id']}]({server}/{path}/-/automate/agent-sessions/{sess['id']}))\n\n"
+            "| Done when | Promise | Result |\n|---|---|---|\n" + rows + extra +
+            f"\n\n_AI-written inspection from a code-built evidence bundle (no comments in it); "
+            f"inspected change `{fp}`._"))
+        self.store.event("agent", f"!{mr['iid']}: Inspector says {verdict['verdict']}", mr_iid=mr["iid"])
+        return verdict
 
     def send_medic(self, mr: dict):
         """A Vallum MR whose pipeline failed: the Pipeline Medic gets at most 2 attempts (B19)."""

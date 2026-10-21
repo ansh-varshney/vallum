@@ -16,16 +16,19 @@ FLOWS = {
     # key: (file, trigger types created when the flow is enabled, catalog name, catalog description)
     "ship": ("ship.yaml", ["assign_reviewer"], "Vallum Ship",
              "Turns a feature request into promises, code and a merge request, under the Rulebook."),
-    "inspect": ("inspect.yaml", [], "Vallum Inspector",
+    "inspect": ("inspect.yaml", ["assign_reviewer"], "Vallum Inspector",
              "Independent check from an evidence bundle only: did we build what was asked, and do the facts prove it?"),
-    "medic": ("medic.yaml", [], "Vallum Pipeline Medic",
+    "medic": ("medic.yaml", ["assign_reviewer"], "Vallum Pipeline Medic",
              "Reads the real failing job logs of a Vallum merge request and fixes the cause with one commit."),
-    "release": ("release.yaml", [], "Vallum Release Captain",
+    "release": ("release.yaml", ["assign_reviewer"], "Vallum Release Captain",
              "Writes plain-English release notes from the release record and closes the request issue."),
-    "incident": ("incident.yaml", [], "Vallum Incident Commander",
+    "incident": ("incident.yaml", ["assign_reviewer"], "Vallum Incident Commander",
              "Writes the postmortem, adds a learned promise by merge request and files the fix issue."),
 }
 # Door A for ship (a work item moved to In progress) is created by ensure_door_a below.
+# GitLab needs at least one trigger to enable a flow. Flows that only code may start (through the Flows API)
+# get the member-only assign_reviewer trigger, which sync then switches off.
+CODE_STARTED = {"inspect", "medic", "release", "incident"}
 FLOWS_DIR = ROOT / ".gitlab" / "duo" / "flows"
 REGISTRY = "vallum_flows"
 WORK_ITEM_EVENT = 7   # GitLab's event type number for work item events (seen on UI-made triggers)
@@ -57,7 +60,9 @@ UPDATE_M = """mutation($input: AiCatalogFlowUpdateInput!) { aiCatalogFlowUpdate(
 CONSUMERS_Q = """query($projectId: ProjectID!, $itemId: AiCatalogItemID) {
   aiCatalogConfiguredItems(projectId: $projectId, itemId: $itemId) {
     nodes { id enabled serviceAccount { id username } item { id name }
-            flowTriggers { id eventTypes description active } } } }"""
+            flowTriggers { id eventTypes description active user { id username } } } } }"""
+TRIGGER_OFF_M = """mutation($input: AiFlowTriggerUpdateInput!) { aiFlowTriggerUpdate(input: $input) {
+  aiFlowTrigger { id active } errors } }"""
 TRIGGER_M = """mutation($input: AiFlowTriggerCreateInput!) { aiFlowTriggerCreate(input: $input) {
   aiFlowTrigger { id eventTypes filter } errors } }"""
 CONSUMER_M = """mutation($input: AiCatalogItemConsumerCreateInput!) { aiCatalogItemConsumerCreate(input: $input) {
@@ -113,10 +118,14 @@ class Flows:
         consumer = self.ensure_enabled(key, item_id)
         if key == "ship":
             consumer = self.ensure_door_a(consumer) or consumer
+        if key in CODE_STARTED:
+            self.triggers_off(key, consumer)
+        bot = (consumer.get("serviceAccount") or {})
+        if not bot.get("username"):
+            bot = next(((t.get("user") or {}) for t in consumer.get("flowTriggers") or [] if t.get("user")), {})
         reg.update(item_id=item_id, definition_sha=sha, name=name, published_at=iso(),
                    consumer_id=num(consumer["id"]), consumer_gid=consumer["id"],
-                   service_account=(consumer.get("serviceAccount") or {}).get("username"),
-                   service_account_id=num((consumer.get("serviceAccount") or {}).get("id")),
+                   service_account=bot.get("username"), service_account_id=num(bot.get("id")),
                    triggers=consumer.get("flowTriggers") or [])
         self.store.b.put(REGISTRY, key, reg)
         return {"key": key, "action": action, **reg}
@@ -133,6 +142,13 @@ class Flows:
             print(f"[flows] {key}: {w}")
         nodes = self.gl.graphql(CONSUMERS_Q, {"projectId": self.project_gid, "itemId": item_id})["aiCatalogConfiguredItems"]["nodes"]
         return nodes[0] if nodes else res["itemConsumer"]
+
+    def triggers_off(self, key: str, consumer: dict):
+        for t in consumer.get("flowTriggers") or []:
+            if t.get("active"):
+                res = self.gl.graphql(TRIGGER_OFF_M, {"input": {"id": t["id"], "active": False}})["aiFlowTriggerUpdate"]
+                print(f"[flows] {key}: switched off trigger {t['id']} {res['errors'] or ''}")
+                t["active"] = False
 
     def ensure_door_a(self, consumer: dict) -> dict | None:
         """Door A: a member moves a work item to In progress (member-only event, FR-DOOR-1)."""
@@ -170,6 +186,69 @@ class Flows:
 
     def session_status(self, workflow_id) -> str | None:
         try:
-            return self.gl.get(f"/ai/duo_workflows/workflows/{workflow_id}").get("status")
+            return str(self.gl.get(f"/ai/duo_workflows/workflows/{workflow_id}").get("status") or "").lower() or None
         except Exception:
             return None
+
+    def trace(self, workflow_id) -> str:
+        return self.gl.request("GET", f"/ai/duo_workflows/workflows/{workflow_id}/trace.jsonl", raw=True).text
+
+
+DONE = {"finished", "completed", "success"}
+DEAD = {"failed", "stopped", "cancelled", "canceled", "error"}
+
+
+def _objects_in(text: str):
+    """Every top-level {...} JSON object inside a string, in order."""
+    depth, start, in_str, esc = 0, None, False, False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"' and depth:
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                try:
+                    yield json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    pass
+
+
+def final_json(trace_text: str, key: str = "verdict") -> dict | None:
+    """The last JSON object carrying `key` anywhere in a session trace (the agent's final answer)."""
+    found = None
+
+    def walk(node):
+        nonlocal found
+        if isinstance(node, dict):
+            if key in node and isinstance(node.get(key), str):
+                found = node
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+        elif isinstance(node, str) and key in node and "{" in node:
+            for obj in _objects_in(node):
+                walk(obj)
+
+    for line in trace_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            walk(json.loads(line))
+        except json.JSONDecodeError:
+            walk(line)
+    return found

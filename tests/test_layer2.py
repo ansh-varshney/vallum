@@ -115,6 +115,20 @@ def test_flow_yaml_is_well_formed(key):
         assert p["unit_primitives"] == [] and "system" in p["prompt_template"]
 
 
+def test_final_json_finds_the_agents_last_verdict_in_a_trace():
+    from vallum.flows import final_json
+
+    lines = [
+        '{"type": "message", "content": "thinking about {\\"verdict\\": \\"draft\\"}"}',
+        '{"type": "final", "final_answer": "Here: ```json\\n{\\"verdict\\": \\"matches\\", \\"fingerprint\\": \\"f1\\", '
+        '\\"trace\\": [{\\"done_when\\": \\"a {b}\\", \\"promise_id\\": \\"p\\", \\"result\\": \\"kept\\"}]}\\n```"}',
+        "not json at all",
+    ]
+    got = final_json("\n".join(lines))
+    assert got["verdict"] == "matches" and got["trace"][0]["done_when"] == "a {b}"
+    assert final_json('{"x": 1}') is None
+
+
 def test_inspector_has_no_tools_and_reviewer_cannot_edit_code():
     ins = yaml.safe_load((FLOWS_DIR / "inspect.yaml").read_text(encoding="utf-8"))
     agent = next(c for c in ins["components"] if c["name"] == "inspector")
