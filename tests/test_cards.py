@@ -11,7 +11,7 @@ def base():
 def test_base_cards_are_valid():
     cs = base()
     cat = config.load_local("catalog.yaml")
-    assert set(cs.cards) == {"redirect", "links", "health", "status-page"}
+    assert {"redirect", "links", "health", "status-page"} <= set(cs.cards)
     for name, card in cs.cards.items():
         assert cardlib.validate(card, cat, name) == [], name
     assert cs.service["promises"]

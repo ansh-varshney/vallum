@@ -72,7 +72,7 @@ def test_non_member_is_refused():
 
 
 def test_app_change_without_card_fails():
-    report = rules.evaluate(ctx(files=["app/features/version.py"], card=None))
+    report = rules.evaluate(ctx(files=["app/features/brand_new.py"], card=None))
     assert statuses(report)[2] == "fail"
 
 
