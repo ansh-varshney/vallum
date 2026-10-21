@@ -7,9 +7,24 @@ allowance permits. Agents write code, promises and explanations; **code decides 
 Built for the GitLab Transcend "Life After Code" hackathon (Path A, Hands-off).
 Live app: <https://vallum-256944994567.us-central1.run.app/status>
 
-> Status: **Layer 1, the safe skeleton**, is in place: promise checker, Gatekeeper, Merge Desk,
-> deploy provenance gate, test drive on Cloud Run, state store, Notifier, Watchdog and visitor simulation.
-> The agents (Layer 2) come next.
+> Status: **Layers 1 and 2** are in place. Layer 1 is the safe skeleton (promise checker, Gatekeeper, Merge Desk,
+> deploy provenance gate, test drive on Cloud Run, state store, Notifier, Watchdog, visitor simulation).
+> Layer 2 adds the agents: five GitLab Duo flows published from this repo, with code still deciding what ships.
+
+## The agents (Layer 2)
+
+| Flow (`.gitlab/duo/flows/`) | Starts on | Does | Can't |
+|---|---|---|---|
+| **Ship** (`ship.yaml`) | Door A: a member moves a Feature issue to *In progress*. Door B: a member adds Vallum as reviewer | Flight Director supervises Planner, four guardians (behavior, speed, reliability, security), Builder and Reviewer; opens the MR | merge, deploy, touch protected paths |
+| **Inspector** (`inspect.yaml`) | Merge Desk, through the Flows API | Checks the work against the request from a code-built evidence bundle only | use any tool; its verdict is read by code from the session |
+| **Pipeline Medic** (`medic.yaml`) | Merge Desk, when an MR pipeline fails (max 2) | Reads the real job logs and fixes the cause | change promises |
+| **Release Captain** (`release.yaml`) | Test drive, after a promotion | Release notes; closes the request issue | decide anything |
+| **Incident Commander** (`incident.yaml`) | Test drive, after a rollback | Postmortem, learned-promise MR, fix issue | edit existing files |
+
+The `flows-sync` job publishes these YAML files to the AI Catalog, enables them and records each flow's bot
+account. Verdicts only count from the right bot (Reviewer) or from the Inspector's own session trace.
+GitLab Duo Code Review runs on every MR with instructions generated from the Rulebook
+(`.gitlab/duo/mr-review-instructions.yaml`). Each role's know-how is in `skills/<role>/SKILL.md`.
 
 ## How a change ships today (Layer 1)
 
@@ -43,6 +58,9 @@ Emergency: run the manual job **`rollback-now`** in any `main` pipeline.
 | `vallum/drive/` | Test-drive controller (Cloud Run REST API, keyless login) |
 | `vallum/patrol/` | Live Patrol and Watchdog |
 | `vallum/notify/` | Status comments, alerts, Ledger |
+| `vallum/flows/` | Publishes the flows; starts them through the Flows API |
+| `vallum/evidence/` | Evidence bundle for the Inspector (primary data only) |
+| `skills/` 🔒 | Know-how for each agent role |
 | `simulate/` | Visitor simulation run by CI jobs |
 | `deploy/service.yaml` | Cloud Run settings as code |
 
