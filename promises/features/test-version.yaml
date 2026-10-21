@@ -1,0 +1,35 @@
+# Feature Card: show which version is answering (the Phase 1 test feature).
+feature: version
+issue: null
+kind: new-endpoint
+tier: standard
+priority: P2
+owns:
+  routes: ["GET /api/version"]
+  files: [app/features/version.py]
+flag: version
+promises:
+  behavior:
+    - id: version-shows-revision
+      says: "GET /api/version names the revision that answered"
+      steps: ["GET /api/version -> 200 contains revision"]
+      where: [mr, drive, live]
+      severity: blocker
+  speed:
+    - id: version-fast
+      says: "95% of version lookups finish in under 200 ms"
+      measure: "p95(latency, route='GET /api/version') < 200ms"
+      where: [mr, drive, live]
+      severity: major
+  reliability:
+    - id: version-reliable
+      says: "Fewer than 0.5% of version lookups fail"
+      measure: "error_rate(route='GET /api/version') < 0.5%"
+      where: [mr, drive, live]
+      severity: blocker
+  security:
+    - id: version-no-secrets
+      says: "The version answer never includes the API key"
+      static: {file_lacks: [app/features/version.py, "api_key"]}
+      where: [mr]
+      severity: blocker
