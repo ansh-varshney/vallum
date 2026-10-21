@@ -1,0 +1,10 @@
+# Protected paths: only the owner may change them. GitLab's code-owner approval needs Maintainer,
+# which the hackathon role doesn't have, so the Gatekeeper enforces this list (rule 5, vallum/policy.yaml).
+/vallum/                  @ansh-varshney
+/.gitlab-ci.yml           @ansh-varshney
+/.gitlab/duo/             @ansh-varshney
+/skills/                  @ansh-varshney
+/AGENTS.md                @ansh-varshney
+/CODEOWNERS               @ansh-varshney
+/promises/service.yaml    @ansh-varshney
+/promises/learned/        @ansh-varshney

@@ -1,0 +1,71 @@
+# Vallum policy: the machine-checkable half of the Rulebook. Protected path.
+# Enforcement always reads this file from the default branch (FR-RULE-4).
+
+owners: [ansh-varshney]          # humans who own the rules; Merge Desk approves as the owner
+project: { id: 87894346, default_branch: main }
+
+labels:
+  opt_in: vallum                 # Layer 1: a member adds this label; Layer 2: member-only triggers add it
+  ready: "vallum::ready"
+  blocked: "vallum::blocked"
+  stalled: "vallum::stalled"
+  needs_human: "vallum::needs-human"
+  ledger: "vallum::ledger"
+  incident: "vallum::incident"
+
+demo: true                       # demo watch times, sample sizes and 60-minute windows
+
+releases:   { one_at_a_time: true, max_fix_attempts: 2, max_review_rounds: 2, max_rebase_fixes: 2, max_flow_runs_per_issue: 3 }
+promises:   { agents_may: [add, tighten], watch_promises_expire: after_release }
+at_risk:    rollback                         # safe default, never "hold and ask an agent"
+
+tiers:
+  core:         { target: 0.999, steps: [1, 10, 50, 100], watch_min: 10, demo_watch_min: 2,   yellow: none, red_below: 0.50, recover_above: 0.65 }
+  standard:     { target: 0.995, steps: [10, 50, 100],    watch_min: 5,  demo_watch_min: 1,   yellow_below: 0.50, yellow_extra_step: 25, red_below: 0.10, recover_above: 0.25 }
+  experimental: { target: 0.990, steps: [25, 100],        watch_min: 2,  demo_watch_min: 0.5, red_below: null }
+
+circuit_breaker: { rollbacks: 3, within_hours: 6 }
+never_allowed: [payments, auth_rewrite, delete_user_data, legal_text, secrets]
+windows:    { production_days: 30, demo_minutes: 60 }
+
+protected_paths:
+  - vallum/
+  - .gitlab-ci.yml
+  - .gitlab/duo/
+  - skills/
+  - AGENTS.md
+  - CODEOWNERS
+  - promises/service.yaml
+  - promises/learned/
+core_paths: [app/main.py, app/store.py, app/security.py]   # touching these makes a change Core
+
+gate:
+  agent_verdicts_required: false   # rule 9; Layer 2 switches this on when the Reviewer and Inspector exist
+  yellow_max_changed_lines: 200
+
+provenance:
+  allow_owner_push: true           # build phase: the owner's own pushes to main may deploy (recorded as an override)
+
+merge_desk: { pipeline_wait_min: 20, rebase_wait_s: 180 }
+
+judge:
+  min_samples:      { speed: 300, reliability: 500 }
+  demo_min_samples: { speed: 100, reliability: 200 }
+  mr_samples: 40                   # localhost load per metric promise in MR pipelines
+  worse_than_old: 0.20             # a metric is broken only if also 20% worse than the old revision
+  at_risk_margin: 0.05             # within 5% of the limit at the end of a step counts as at risk
+  step_retry_s: 5
+  tick_s: 10
+  warmup_s: 5
+
+simulate:
+  links: 120                       # persistent "real" links, popularity follows a Zipf curve
+  base_rps: 20
+  max_rps: 150
+  step0_requests: 300
+  mix: { "GET /r/{code}": 0.85, "GET /api/links/{code}": 0.08, "GET /healthz": 0.05, "POST /api/links": 0.02 }
+
+watchdog:
+  deadlines_min: { planning: 15, building: 30, reviewing: 15, gated: 10, merged: 10, driving_extra: 10 }
+
+cloud_run: { service: vallum, region: us-central1, max_scale_cap: 5, project: vallum-512306 }

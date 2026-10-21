@@ -1,13 +1,19 @@
-# Vallum: Day-1 platform checks.
-# Temporary. Phase 1 replaces this file with the real pipeline.
+# Vallum pipelines. Protected path: the Gatekeeper refuses agent changes to this file (rule 5),
+# and the deploy provenance gate refuses to deploy anything that skipped these jobs.
+#
+#   MR pipelines (no tokens, no cloud):  unit tests · promise checker on localhost · SAST · secrets · Gatekeeper report
+#   main push / API pipelines:           provenance gate · unit tests · scans · build image · test drive · Merge Desk
+#   main schedule / web pipelines:       Live Patrol (Watchdog, Ledger) · Merge Desk
+#   any main pipeline:                   rollback-now (manual, needs no variables)
 
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      when: never          # branch pipelines only, so MRs don't get duplicate pipelines
-    - when: always
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"
+      when: never
+    - if: $CI_COMMIT_BRANCH
 
-stages: [check]
+stages: [gate, test, report, build, drive, desk]
 
 variables:
   GCP_PROJECT_ID: "vallum-512306"
@@ -15,124 +21,187 @@ variables:
   GCP_REGION: "us-central1"
   GCP_WIF_PROVIDER: "projects/256944994567/locations/global/workloadIdentityPools/gitlab-pool/providers/gitlab-provider"
   GCP_DEPLOYER_SA: "vallum-deployer@vallum-512306.iam.gserviceaccount.com"
-  GCP_APP_SA: "vallum-app@vallum-512306.iam.gserviceaccount.com"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  AST_ENABLE_MR_PIPELINES: "true"
+  SAST_EXCLUDED_PATHS: "tests, .cache"
 
-.on_main_manual:
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE != "schedule"
-      when: manual
-  allow_failure: true
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
 
-# Runs in every pipeline, so "Pipelines must succeed" has something to pass.
-check:hello:
-  stage: check
-  image: alpine:3.20
-  script:
-    - echo "Vallum Day-1 checks. ref=$CI_COMMIT_REF_NAME source=$CI_PIPELINE_SOURCE user=$GITLAB_USER_LOGIN"
+.if_mr: &if_mr
+  if: $CI_PIPELINE_SOURCE == "merge_request_event"
+.if_release: &if_release
+  if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "api")
+.if_ops: &if_ops
+  if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web")
+.if_branch: &if_branch
+  if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
 
-# Check 10: the owner token must exist on main and be absent on every other branch.
-check:token-visibility:
-  stage: check
-  image: alpine:3.20
-  script:
-    - |
-      if [ -n "${OWNER_TOKEN:-}" ]; then
-        echo "OWNER_TOKEN is AVAILABLE here (ref=$CI_COMMIT_REF_NAME, protected=$CI_COMMIT_REF_PROTECTED)"
-      else
-        echo "OWNER_TOKEN is NOT available here (ref=$CI_COMMIT_REF_NAME, protected=$CI_COMMIT_REF_PROTECTED)"
-      fi
-
-# Check 6: shows when scheduled pipelines actually run.
-check:scheduled:
-  stage: check
-  image: alpine:3.20
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-  script:
-    - echo "Scheduled pipeline ran at $(date -u +%FT%TZ)"
-
-# Check 4: the owner token can open and merge an MR on main (the Merge Desk's core move).
-check:merge:
-  stage: check
-  extends: .on_main_manual
-  image: alpine:3.20
+.python:
+  image: python:3.12-slim
+  cache:
+    key: pip-v1
+    paths: [.cache/pip]
   before_script:
-    - apk add --no-cache curl jq > /dev/null
-  script:
-    - |
-      set -eu
-      API="$CI_API_V4_URL/projects/$CI_PROJECT_ID"
-      H="PRIVATE-TOKEN: $OWNER_TOKEN"
-      BR="check/owner-merge-$CI_PIPELINE_ID"
-      curl -sf -X POST -H "$H" "$API/repository/branches?branch=$BR&ref=main" > /dev/null
-      jq -n --arg br "$BR" --arg id "$CI_PIPELINE_ID" \
-        '{branch: $br, commit_message: "Day-1 check 4: owner-token merge",
-          actions: [{action: "create", file_path: ("checks/merge-" + $id + ".txt"), content: ("Merged by the owner token in pipeline " + $id)}]}' > commit.json
-      curl -sf -X POST -H "$H" -H "Content-Type: application/json" --data @commit.json "$API/repository/commits" > /dev/null
-      MR=$(curl -sf -X POST -H "$H" "$API/merge_requests" \
-        --data-urlencode "source_branch=$BR" --data-urlencode "target_branch=main" \
-        --data-urlencode "title=Day-1 check 4: owner-token merge" --data "remove_source_branch=true" | jq -r .iid)
-      echo "Opened MR !$MR; waiting for its pipeline (Pipelines must succeed is on)"
-      for i in $(seq 1 60); do
-        ST=$(curl -sf -H "$H" "$API/merge_requests/$MR" | jq -r '.head_pipeline.status // "none"')
-        echo "  pipeline: $ST"
-        [ "$ST" = "success" ] && break
-        [ "$ST" = "failed" ] && { echo "MR pipeline failed"; exit 1; }
-        sleep 10
-      done
-      SHA=$(curl -sf -H "$H" "$API/merge_requests/$MR" | jq -r .sha)
-      curl -sf -X PUT -H "$H" "$API/merge_requests/$MR/merge?sha=$SHA&should_remove_source_branch=true" \
-        | jq -r '"RESULT: MR !\(.iid) state=\(.state) merged_by=\(.merged_by.username)"'
+    - pip install -q --disable-pip-version-check -r requirements.txt -r requirements-vallum.txt
 
-# Check 5: the owner token can start a flow through the Flows API.
-# Run it with the job variable HELLO_CONSUMER_ID set (from the AI Catalog step).
-check:flows-api:
-  stage: check
-  extends: .on_main_manual
-  image: alpine:3.20
-  before_script:
-    - apk add --no-cache curl jq > /dev/null
-  script:
-    - |
-      set -eu
-      : "${HELLO_CONSUMER_ID:?Set HELLO_CONSUMER_ID when you run this job}"
-      jq -n --arg pid "$CI_PROJECT_ID" --argjson cid "$HELLO_CONSUMER_ID" \
-        '{project_id: $pid, ai_catalog_item_consumer_id: $cid, start_workflow: true, environment: "ambient", issue_id: 1,
-          goal: "Day-1 check 5: started through the Flows API from a main pipeline. Post your hello comment on issue 1."}' > body.json
-      CODE=$(curl -s -o resp.json -w "%{http_code}" -X POST -H "PRIVATE-TOKEN: $OWNER_TOKEN" \
-        -H "Content-Type: application/json" --data @body.json "$CI_API_V4_URL/ai/duo_workflows/workflows")
-      echo "HTTP $CODE"
-      jq '{id, status, workflow_definition, web_url: (.web_url // null), message: (.message // null)}' resp.json || cat resp.json
-
-# Check 8: keyless login to Google Cloud, deploy, private tag URL, 90/10 traffic split.
-check:cloud-run:
-  stage: check
-  extends: .on_main_manual
-  image: google/cloud-sdk:slim
+.gcp:
   id_tokens:
     GCP_ID_TOKEN:
       aud: https://iam.googleapis.com/projects/256944994567/locations/global/workloadIdentityPools/gitlab-pool/providers/gitlab-provider
-  script:
-    - echo "$GCP_ID_TOKEN" > /tmp/oidc_token
-    - gcloud iam workload-identity-pools create-cred-config "$GCP_WIF_PROVIDER" --service-account="$GCP_DEPLOYER_SA" --credential-source-file=/tmp/oidc_token --output-file=/tmp/cred.json
-    - gcloud auth login --cred-file=/tmp/cred.json --quiet
-    - gcloud config set project "$GCP_PROJECT_ID"
-    - gcloud run deploy vallum-check --image=us-docker.pkg.dev/cloudrun/container/hello --region="$GCP_REGION" --service-account="$GCP_APP_SA" --allow-unauthenticated --min-instances=0 --max-instances=1 --quiet
-    - gcloud run deploy vallum-check --image=us-docker.pkg.dev/cloudrun/container/hello --region="$GCP_REGION" --service-account="$GCP_APP_SA" --no-traffic --tag=cand --update-env-vars="CHECK_RUN=$CI_PIPELINE_ID" --quiet
-    - gcloud run services update-traffic vallum-check --region="$GCP_REGION" --to-tags=cand=10 --quiet
-    - gcloud run services describe vallum-check --region="$GCP_REGION" --format="yaml(status.url,status.traffic)"
 
-# Check 9: Firestore emulator inside a CI job, with no cloud credentials (how MR tests will run).
-check:emulator:
-  stage: check
-  image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
-  rules:
-    - when: manual
-  allow_failure: true
+# ---------------------------------------------------------------- gate
+provenance-gate:
+  stage: gate
+  extends: [.python, .gcp]
+  rules: [*if_release]
+  needs: []
   script:
-    - gcloud emulators firestore start --host-port=127.0.0.1:8080 > /tmp/emulator.log 2>&1 &
-    - for i in $(seq 1 45); do curl -s 127.0.0.1:8080 > /dev/null && break; sleep 2; done
-    - >
-      curl -s -X POST "http://127.0.0.1:8080/v1/projects/vallum-test/databases/(default)/documents/checks?documentId=day1"
-      -H "Content-Type: application/json" -d '{"fields":{"hello":{"stringValue":"world"}}}' > /dev/null
-    - curl -s "http://127.0.0.1:8080/v1/projects/vallum-test/databases/(default)/documents/checks/day1" | grep -q '"world"' && echo "write/read OK"
+    - python -m vallum.gate.provenance
+  artifacts:
+    reports:
+      dotenv: reports/provenance.env
+
+# ---------------------------------------------------------------- test
+unit-tests:
+  stage: test
+  extends: .python
+  rules: [*if_mr, *if_release, *if_branch]
+  needs: []
+  script:
+    - pytest --junitxml=reports/junit.xml
+  artifacts:
+    when: always
+    reports:
+      junit: reports/junit.xml
+
+promise-checker:
+  stage: test
+  extends: .python
+  rules: [*if_mr]
+  needs: []
+  services:
+    - name: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+      alias: firestore
+      command: ["gcloud", "emulators", "firestore", "start", "--host-port=0.0.0.0:8080"]
+  variables:
+    FIRESTORE_EMULATOR_HOST: "firestore:8080"
+    GOOGLE_CLOUD_PROJECT: "vallum-test"
+  script:
+    - python -m vallum.checker --out reports/checker.json
+  artifacts:
+    when: always
+    paths: [reports/]
+
+semgrep-sast:
+  rules: [*if_mr, *if_release]
+  artifacts:
+    when: always
+    paths: [gl-sast-report.json]
+
+secret_detection:
+  rules: [*if_mr, *if_release]
+  artifacts:
+    when: always
+    paths: [gl-secret-detection-report.json]
+
+# ---------------------------------------------------------------- report (MR only, no powers)
+gatekeeper-report:
+  stage: report
+  extends: .python
+  rules: [*if_mr]
+  needs:
+    - promise-checker
+    - { job: semgrep-sast, optional: true }
+    - { job: secret_detection, optional: true }
+  script:
+    - python -m vallum.gate report --out reports/gatekeeper.json
+  artifacts:
+    when: always
+    paths: [reports/gatekeeper.json]
+
+# ---------------------------------------------------------------- build
+build-image:
+  stage: build
+  extends: .gcp
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  rules:
+    - <<: *if_release
+      changes: [app/**/*, Dockerfile, requirements.txt, deploy/**/*]
+  needs: [provenance-gate, unit-tests]
+  script:
+    - apk add --no-cache curl jq > /dev/null
+    - TOKEN=$(sh vallum/drive/gcp-token.sh)
+    - echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${GCP_REGION}-docker.pkg.dev"
+    - TAG="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/vallum/app:${CI_COMMIT_SHA}"
+    - docker build --pull -t "$TAG" .
+    - docker push "$TAG"
+    - DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$TAG")
+    - SIZE=$(docker image inspect "$TAG" --format='{{.Size}}')
+    - mkdir -p reports
+    - echo "IMAGE=$DIGEST" > reports/build.env
+    - echo "{\"image\":\"$DIGEST\",\"image_bytes\":$SIZE}" > reports/build.json
+    - echo "Built $DIGEST ($((SIZE / 1000000)) MB)"
+  artifacts:
+    paths: [reports/build.json]
+    reports:
+      dotenv: reports/build.env
+
+# ---------------------------------------------------------------- drive
+test-drive:
+  stage: drive
+  extends: [.python, .gcp]
+  resource_group: release
+  timeout: 45m
+  rules: [*if_release]
+  needs:
+    - provenance-gate
+    - { job: build-image, optional: true }
+  environment:
+    name: production
+    url: https://vallum-256944994567.us-central1.run.app/status
+  script:
+    - python -m vallum.drive release
+  artifacts:
+    when: always
+    paths: [reports/]
+
+rollback-now:
+  stage: drive
+  extends: [.python, .gcp]
+  rules:
+    - <<: *if_release
+      when: manual
+    - <<: *if_ops
+      when: manual
+  allow_failure: true
+  needs: []
+  script:
+    - python -m vallum.drive rollback-now
+
+live-patrol:
+  stage: drive
+  extends: [.python, .gcp]
+  rules: [*if_ops]
+  needs: []
+  script:
+    - python -m vallum.patrol
+
+# ---------------------------------------------------------------- desk
+merge-desk:
+  stage: desk
+  extends: [.python, .gcp]
+  resource_group: release
+  timeout: 30m
+  rules:
+    - <<: *if_release
+      when: always
+    - *if_ops
+  needs:
+    - { job: test-drive, optional: true }
+  script:
+    - python -m vallum.desk

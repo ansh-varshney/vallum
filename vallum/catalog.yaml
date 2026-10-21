@@ -1,0 +1,15 @@
+# The kinds of change Vallum accepts. Human-readable version: catalog.md. Protected path.
+kinds:
+  new-endpoint:    { requires: [behavior, speed, reliability, security], default_tier: standard }
+  behavior-change: { requires: [behavior, compatibility, data], default_tier: feature }
+  ui-page:         { requires: [behavior, speed, security], default_tier: standard }
+  background-job:  { requires: [behavior, data, cost], default_tier: standard }
+  integration:     { requires: [behavior, reliability, security], default_tier: experimental }
+  data-change:     { requires: [data, compatibility, behavior], default_tier: standard, core_if_routes: core }
+  performance:     { requires: [speed, behavior, cost], default_tier: feature }
+  config-infra:    { requires: [speed, cost, operability], default_tier: app }
+  dependency:      { requires: [compatibility, security], default_tier: app }
+  bug-fix:         { requires: [behavior], default_tier: feature, adds_learned_promise: true }
+  security-fix:    { requires: [security, behavior], default_tier: feature }
+never_allowed:     [payments, auth_rewrite, delete_user_data, legal_text, secrets]
+promise_types:     [behavior, speed, reliability, security, data, compatibility, cost, operability]

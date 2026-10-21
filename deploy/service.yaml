@@ -1,0 +1,28 @@
+# Cloud Run settings as code (Knative service format). The test-drive controller fills in the
+# image, revision name and traffic split, then replaces the service. The Gatekeeper caps values
+# against vallum/policy.yaml. The Infra Tuner may propose changes here by merge request.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: vallum
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      serviceAccountName: vallum-app@vallum-512306.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: FILLED_IN_BY_TEST_DRIVE
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: "1"

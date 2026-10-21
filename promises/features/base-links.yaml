@@ -1,0 +1,50 @@
+# Feature Card: creating, reading and deleting short links.
+feature: links
+issue: null
+kind: new-endpoint
+tier: standard
+priority: P2
+owns:
+  routes: ["POST /api/links", "GET /api/links/{code}", "DELETE /api/links/{code}"]
+  files: [app/features/links.py]
+flag: null
+promises:
+  behavior:
+    - id: link-create-read
+      says: "A new link can be read back with its long URL"
+      steps:
+        - "POST /api/links {url: 'https://example.com/l-{rand}'} -> 201 => link"
+        - "GET /api/links/{link.code} -> 200 contains https://example.com/l-{rand}"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: link-delete
+      says: "A deleted link stops redirecting"
+      steps:
+        - "POST /api/links {url: 'https://example.com/d-{rand}'} -> 201 => link"
+        - "DELETE /api/links/{link.code} -> 204"
+        - "GET /api/links/{link.code} -> 404"
+      where: [mr, drive]
+      severity: major
+  speed:
+    - id: link-details-fast
+      says: "95% of link lookups finish in under 300 ms"
+      measure: "p95(latency, route='GET /api/links/{code}') < 300ms"
+      where: [mr, drive, live]
+      severity: major
+  reliability:
+    - id: link-api-reliable
+      says: "Fewer than 0.5% of link lookups fail"
+      measure: "error_rate(route='GET /api/links/{code}') < 0.5%"
+      where: [mr, drive, live]
+      severity: blocker
+  security:
+    - id: link-create-needs-key
+      says: "Creating a link without the API key is refused"
+      steps: ["anon POST /api/links {url: 'https://example.com/x'} -> 401"]
+      where: [mr, drive]
+      severity: blocker
+    - id: link-http-only
+      says: "Only http and https addresses are accepted"
+      steps: ["POST /api/links {url: 'javascript:alert(1)'} -> 422"]
+      where: [mr, drive]
+      severity: blocker

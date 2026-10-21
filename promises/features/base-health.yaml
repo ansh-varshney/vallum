@@ -1,0 +1,29 @@
+# Feature Card: the health check.
+feature: health
+issue: null
+kind: config-infra
+tier: standard
+priority: P2
+owns:
+  routes: ["GET /healthz"]
+  files: [app/features/health.py]
+flag: null
+promises:
+  speed:
+    - id: health-fast
+      says: "95% of health checks finish in under 200 ms"
+      measure: "p95(latency, route='GET /healthz') < 200ms"
+      where: [mr, drive, live]
+      severity: major
+  cost:
+    - id: health-no-store
+      says: "The health check never touches the database"
+      static: {file_lacks: [app/features/health.py, "store"]}
+      where: [mr]
+      severity: minor
+  operability:
+    - id: health-reports-revision
+      says: "The health check reports which revision answered"
+      steps: ["GET /healthz -> 200 contains revision"]
+      where: [mr, drive, live]
+      severity: major

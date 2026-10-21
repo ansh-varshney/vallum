@@ -1,0 +1,42 @@
+# Feature Card: redirects, the feature everything depends on.
+feature: redirect
+issue: null
+kind: new-endpoint
+tier: core
+priority: P2
+owns:
+  routes: ["GET /r/{code}"]
+  files: [app/features/redirect.py]
+flag: null                     # Core redirects have no kill switch; rollback is the safety net
+promises:
+  behavior:
+    - id: redirect-works
+      says: "A short link sends people to its long URL"
+      steps:
+        - "POST /api/links {url: 'https://example.com/r-{rand}'} -> 201 => link"
+        - "GET /r/{link.code} -> 302 https://example.com/r-{rand}"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: redirect-unknown-404
+      says: "An unknown short link answers 404, not an error"
+      steps: ["GET /r/unknown{rand} -> 404"]
+      where: [mr, drive, live]
+      severity: major
+  speed:
+    - id: redirect-fast
+      says: "95% of redirects finish in under 150 ms"
+      measure: "p95(latency, route='GET /r/{code}') < 150ms"
+      where: [mr, drive, live]
+      severity: blocker
+  reliability:
+    - id: redirect-reliable
+      says: "Fewer than 0.1% of redirects fail"
+      measure: "error_rate(route='GET /r/{code}') < 0.1%"
+      where: [mr, drive, live]
+      severity: blocker
+  security:
+    - id: redirect-rejects-odd-codes
+      says: "Codes with characters outside letters, digits, dash and underscore are refused"
+      steps: ["GET /r/a.b -> 404", "GET /r/a%27b -> 404"]
+      where: [mr, drive]
+      severity: major

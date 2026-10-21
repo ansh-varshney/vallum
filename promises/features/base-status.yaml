@@ -1,0 +1,29 @@
+# Feature Card: the public status page.
+feature: status-page
+issue: null
+kind: ui-page
+tier: standard
+priority: P2
+owns:
+  routes: ["GET /status"]
+  files: [app/features/status.py]
+flag: null
+promises:
+  behavior:
+    - id: status-renders
+      says: "The status page loads and says that visitors are simulated"
+      steps: ["GET /status -> 200 contains Visitors are simulated"]
+      where: [mr, drive, live]
+      severity: major
+  speed:
+    - id: status-fast
+      says: "95% of status page loads finish in under 800 ms"
+      measure: "p95(latency, route='GET /status') < 800ms"
+      where: [mr, drive]
+      severity: minor
+  security:
+    - id: status-no-secrets
+      says: "The status page never reads the secrets document"
+      static: {file_lacks: [app/features/status.py, "vallum_secrets"]}
+      where: [mr]
+      severity: blocker

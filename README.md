@@ -1,93 +1,67 @@
-# vallum
+# 🛡 Vallum
 
+**A hands-off release guardian on GitLab Duo Agent Platform.** Vallum ships a requested feature to
+production by itself, but only if the feature keeps its promises, and only as boldly as its mistake
+allowance permits. Agents write code, promises and explanations; **code decides what ships**.
 
+Built for the GitLab Transcend "Life After Code" hackathon (Path A, Hands-off).
+Live app: <https://vallum-256944994567.us-central1.run.app/status>
 
-## Getting started
+> Status: **Layer 1, the safe skeleton**, is in place: promise checker, Gatekeeper, Merge Desk,
+> deploy provenance gate, test drive on Cloud Run, state store, Notifier, Watchdog and visitor simulation.
+> The agents (Layer 2) come next.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## How a change ships today (Layer 1)
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+1. A project member opens a merge request with a Feature Card in `promises/features/` and adds the label `vallum`.
+2. The **MR pipeline** (no tokens, no cloud access) runs the unit tests, the **promise checker** on a localhost copy
+   of the app with the Firestore emulator (including the *fail-first* check: new behavior promises must fail on
+   `main` and pass on the branch), SAST, secret detection and the **Gatekeeper report**.
+3. The **Merge Desk** (a job on `main`, `resource_group: release`, every 5 minutes and at the end of every main
+   pipeline) picks the next ready MR by priority, rebases it, waits for a fresh pipeline on that exact commit,
+   runs all **12 Gatekeeper rules**, records the commit as sanctioned, gives the owner's approval that the MR
+   approval rule needs, and merges pinned to that SHA.
+4. The **main pipeline** starts with the **deploy provenance gate** (refuses commits that skipped the Merge Desk),
+   builds the image into Artifact Registry and runs the **test drive** on Cloud Run: deploy with 0% traffic, step 0
+   on the private address, then the tier's traffic steps (Standard: 10% → 50% → 100%) while simulated visitors
+   play the users. Kept means promote; broken or unclear means **instant rollback**.
+5. The **Notifier** keeps one live status comment on the MR, alerts the change owner, and mirrors the state
+   store into the **Ledger** issue. The **Watchdog** undoes anything left half-done.
 
-## Add your files
+Emergency: run the manual job **`rollback-now`** in any `main` pipeline.
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Repository
 
+| Path | What it is |
+|---|---|
+| `app/` | FastAPI link shortener; one module per feature in `app/features/` |
+| `promises/` | Feature Cards, app-wide promises (`service.yaml`), learned promises |
+| `vallum/` 🔒 | Rulebook, policy, catalog, card schema and all of Vallum's code |
+| `vallum/checker/` | Promise checker (steps, measure, static, scan) and fail-first check |
+| `vallum/gate/` | Gatekeeper (12 rules), provenance gate |
+| `vallum/desk/` | Merge Desk |
+| `vallum/drive/` | Test-drive controller (Cloud Run REST API, keyless login) |
+| `vallum/patrol/` | Live Patrol and Watchdog |
+| `vallum/notify/` | Status comments, alerts, Ledger |
+| `simulate/` | Visitor simulation run by CI jobs |
+| `deploy/service.yaml` | Cloud Run settings as code |
+
+🔒 = protected path: the Gatekeeper refuses changes from anyone but the owner.
+
+## Google Cloud
+
+Cloud Run (revisions, tags, traffic split, min instances 0), Artifact Registry, Firestore (app data and the
+state store), and Workload Identity Federation from protected `main` pipelines only. No key files exist.
+**Visitors are simulated** by CI jobs during the hackathon; nothing runs on Google Cloud between drives.
+
+## Run it locally
+
+```bash
+pip install -r requirements.txt -r requirements-vallum.txt
+pytest
+APP_STORE=memory APP_API_KEY=dev uvicorn app.main:app --reload
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-* [Set up project integrations](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/settings/integrations)
-
-## Collaborate with your team
-
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT

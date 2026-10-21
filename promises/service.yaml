@@ -1,0 +1,27 @@
+# App-wide promises, written once by the owner. Protected path. They feed the app-wide allowance.
+service: vallum
+promises:
+  - id: app-available
+    type: reliability
+    says: "Fewer than 0.5% of all requests fail"
+    measure: "error_rate(route='*') < 0.5%"
+    where: [drive, live]
+    severity: blocker
+  - id: app-healthy
+    type: operability
+    says: "/healthz answers 200"
+    steps: ["GET /healthz -> 200 contains ok"]
+    where: [mr, drive, live]
+    severity: blocker
+  - id: app-tags-revision
+    type: operability
+    says: "Every response says which revision served it"
+    steps: ["GET /healthz -> 200 header x-revision"]
+    where: [mr, drive]
+    severity: blocker
+  - id: app-no-ip-logging
+    type: data
+    says: "Visitor IP addresses are never logged"
+    static: {file_lacks: [app/telemetry.py, "client"]}
+    where: [mr]
+    severity: blocker
