@@ -129,6 +129,29 @@ class Desk:
                 raise
         raise last
 
+    TRANSIENT = {6, 11, 12}   # stale rebase or pipeline, mode, queue: can change without a new commit
+
+    def full_check(self, mr: dict) -> dict:
+        ctx = context.build(self.gl, mr, "desk")
+        ctx.modes = self.store.doc("modes")
+        ctx.safe_mode = bool(self.store.doc("meta").get("safe_mode"))
+        ctx.queue_head = True
+        ctx.caps_ok, ctx.caps_detail = True, "next in the queue; no caps hit"
+        report = rules.evaluate(ctx)
+        print(rules.render(report))
+        return report
+
+    @staticmethod
+    def _not_passed(report: dict) -> set:
+        return {r["no"] for r in report["rules"] if r["status"] not in ("pass", "waived")}
+
+    def only_transient(self, report: dict) -> bool:
+        return self._not_passed(report) <= self.TRANSIENT
+
+    def only_stale(self, report: dict) -> bool:
+        stale = [r for r in report["rules"] if r["no"] == 6 and "not rebased" in r["detail"]]
+        return self._not_passed(report) == {6} and bool(stale)
+
     # ------------------------------------------------------------------ main
     def run(self) -> int:
         meta = self.store.doc("meta")
@@ -144,7 +167,7 @@ class Desk:
 
         ready, waiting, blocked = self.classify(self.gl.open_mrs(self.pol.label("opt_in")))
         # an MR that failed the full check stays out of the queue until it gets a new commit
-        refused = [m for m in ready if self.store.timeline(f"{MR}-{m['iid']}").get("gate_failed_sha") == m["sha"]]
+        refused = [m for m in ready if self.store.timeline(f"{MR}-{m['iid']}").get("refused_sha") == m["sha"]]
         ready = [m for m in ready if m not in refused]
         blocked += refused
         ready.sort(key=lambda m: priority.queue_key(self.level(m), m.get("created_at")))
@@ -179,20 +202,26 @@ class Desk:
             self.notify.ledger()
             return 0
 
-        ctx = context.build(self.gl, mr, "desk")
-        ctx.modes = self.store.doc("modes")
-        ctx.safe_mode = bool(self.store.doc("meta").get("safe_mode"))
-        ctx.queue_head = True
-        ctx.caps_ok, ctx.caps_detail = True, "next in the queue; no caps hit"
-        report = rules.evaluate(ctx)
-        print(rules.render(report))
+        report = self.full_check(mr)
+        if not report["ok"] and self.only_stale(report):
+            self.log(f"!{iid}: main moved during the check; rebasing once more")
+            mr = self.rebase_and_wait(self.gl.mr(iid))
+            if not mr:
+                self.notify.ledger()
+                return 0
+            report = self.full_check(mr)
         tier = report["tier"]
         if not report["ok"]:
-            failed = "; ".join(f"rule {r['no']}: {r['detail']}" for r in report["rules"] if r["status"] != "pass" and r["status"] != "waived")
-            self.store.set_timeline(f"{MR}-{iid}", gate_failed_sha=mr["sha"], blocked_sha=mr["sha"])
-            self.notify.status(MR, iid, f"Gatekeeper {report['score']}", "failed", tier=tier,
-                               now=f"Not merged. {failed}", action="fix the failed rules; the desk retries on its next run.")
-            self.gl.mr_labels(iid, add=[self.pol.label("blocked")], remove=[self.pol.label("ready")])
+            failed = "; ".join(f"rule {r['no']}: {r['detail']}" for r in report["rules"] if r["status"] not in ("pass", "waived"))
+            if self.only_transient(report):
+                # main moved, a mode or the queue: nothing wrong with the MR itself, so retry next run
+                self.notify.status(MR, iid, f"Gatekeeper {report['score']}", "waiting", tier=tier,
+                                   now=f"Not merged yet: {failed}. The desk tries again on its next run.", action="nothing.")
+            else:
+                self.store.set_timeline(f"{MR}-{iid}", refused_sha=mr["sha"], blocked_sha=mr["sha"])
+                self.notify.status(MR, iid, f"Gatekeeper {report['score']}", "failed", tier=tier,
+                                   now=f"Not merged. {failed}", action="fix the failed rules and push; the desk retries after a new commit.")
+                self.gl.mr_labels(iid, add=[self.pol.label("blocked")], remove=[self.pol.label("ready")])
             self.notify.ledger()
             return 0
 
