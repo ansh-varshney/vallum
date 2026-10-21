@@ -5,7 +5,7 @@ JSON parses. Anyone can type the marker; nobody but the bot can author as the bo
 import json
 import re
 
-MARKERS = {"review": "<!-- vallum:review -->", "inspector": "<!-- vallum:inspector -->"}
+MARKERS = {"review": "🛡 Vallum: **Reviewer verdict**", "inspector": "🛡 Vallum: **Inspector verdict**"}
 EXPECTED_BOT = {"review": "ship", "inspector": "inspect"}
 _JSON = re.compile(r"```json\s*(\{.*?\})\s*```", re.S)
 

@@ -36,7 +36,6 @@ write a watch promise the checker can measure during the test drive:
 ## Verdict note (exactly one, with create_merge_request_note)
 ```
 🛡 Vallum: **Reviewer verdict** · <approve | changes>
-<!-- vallum:review -->
 ```json
 {"verdict": "approve", "sha": "<MR head sha>", "watch_promises": [<ids>], "duo_points": [{"point": "...", "answer": "resolved|not-applicable|watch"}], "changes": ["<only when verdict is changes>"]}
 ```

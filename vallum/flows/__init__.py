@@ -13,13 +13,19 @@ import yaml
 from vallum.config import ROOT, iso
 
 FLOWS = {
-    # key: (file, trigger types created when the flow is enabled)
-    "ship": ("ship.yaml", ["assign_reviewer"]),   # Door B; Door A (status -> In progress) is added below
-    "inspect": ("inspect.yaml", []),
-    "medic": ("medic.yaml", []),
-    "release": ("release.yaml", []),
-    "incident": ("incident.yaml", []),
+    # key: (file, trigger types created when the flow is enabled, catalog name, catalog description)
+    "ship": ("ship.yaml", ["assign_reviewer"], "Vallum Ship",
+             "Turns a feature request into promises, code and a merge request, under the Rulebook."),
+    "inspect": ("inspect.yaml", [], "Vallum Inspector",
+             "Independent check from an evidence bundle only: did we build what was asked, and do the facts prove it?"),
+    "medic": ("medic.yaml", [], "Vallum Pipeline Medic",
+             "Reads the real failing job logs of a Vallum merge request and fixes the cause with one commit."),
+    "release": ("release.yaml", [], "Vallum Release Captain",
+             "Writes plain-English release notes from the release record and closes the request issue."),
+    "incident": ("incident.yaml", [], "Vallum Incident Commander",
+             "Writes the postmortem, adds a learned promise by merge request and files the fix issue."),
 }
+# Door A for ship (a work item moved to In progress) is created by ensure_door_a below.
 FLOWS_DIR = ROOT / ".gitlab" / "duo" / "flows"
 REGISTRY = "vallum_flows"
 WORK_ITEM_EVENT = 7   # GitLab's event type number for work item events (seen on UI-made triggers)
@@ -88,7 +94,7 @@ class Flows:
         text, spec = definition(key)
         sha = hashlib.sha256(text.encode()).hexdigest()[:16]
         reg = self.registry(key)
-        name, desc = spec.get("name", f"Vallum {key}"), spec.get("description", f"Vallum {key} flow")
+        name, desc = FLOWS[key][2], FLOWS[key][3]
         item_id = reg.get("item_id") or self.find_item(name)
         action = "unchanged"
         if not item_id:

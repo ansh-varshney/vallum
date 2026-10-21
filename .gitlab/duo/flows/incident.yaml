@@ -2,8 +2,6 @@
 # test-drive job (or the Live Patrol) after code has already rolled back. Agents think after code acts.
 version: "v1"
 environment: ambient
-name: Vallum Incident Commander
-description: "Writes the postmortem, adds a learned promise by merge request and files the fix issue."
 
 components:
   - name: incident_commander
@@ -15,7 +13,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_issue, get_merge_request, list_merge_request_diffs, get_repository_file, create_issue_note, create_issue, create_commit, create_merge_request]
-    max_cycles: 25
     ui_log_events: [on_agent_final_answer, on_tool_execution_success, on_tool_execution_failed]
 
 prompts:

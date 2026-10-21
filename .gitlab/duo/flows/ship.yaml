@@ -4,8 +4,6 @@
 # it never merges, never deploys and holds no tokens. Code decides everything after that.
 version: "v1"
 environment: ambient
-name: Vallum Ship
-description: "Turns a feature request into promises, code and a merge request, under the Rulebook."
 
 components:
   - name: planner
@@ -16,7 +14,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_issue, get_repository_file, list_repository_tree]
-    max_cycles: 20
     ui_log_events: [on_agent_final_answer, on_tool_execution_failed]
 
   - name: guardian_behavior
@@ -28,7 +25,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_repository_file]
-    max_cycles: 8
     ui_log_events: [on_agent_final_answer]
 
   - name: guardian_speed
@@ -40,7 +36,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_repository_file]
-    max_cycles: 6
     ui_log_events: [on_agent_final_answer]
 
   - name: guardian_reliability
@@ -52,7 +47,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_repository_file]
-    max_cycles: 6
     ui_log_events: [on_agent_final_answer]
 
   - name: guardian_security
@@ -64,7 +58,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_repository_file]
-    max_cycles: 6
     ui_log_events: [on_agent_final_answer]
 
   - name: builder
@@ -75,7 +68,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_repository_file, list_repository_tree, get_merge_request, create_commit, create_merge_request]
-    max_cycles: 30
     ui_log_events: [on_agent_final_answer, on_tool_execution_success, on_tool_execution_failed]
 
   - name: reviewer
@@ -86,7 +78,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_merge_request, list_merge_request_diffs, list_all_merge_request_notes, get_repository_file, create_merge_request_note]
-    max_cycles: 20
     ui_log_events: [on_agent_final_answer, on_tool_execution_success, on_tool_execution_failed]
 
   - name: flight_director
@@ -108,7 +99,6 @@ components:
       - name: builder
       - name: reviewer
     max_delegations: 14
-    max_cycles: 40
     toolset: [get_issue, get_merge_request, list_issues, get_repository_file, create_issue_note, create_merge_request_note, update_issue]
     ui_log_events: [on_agent_final_answer, on_tool_execution_success, on_tool_execution_failed]
 

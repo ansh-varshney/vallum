@@ -2,8 +2,6 @@
 # Flows API after a release is promoted. It writes the human summary; it decides nothing.
 version: "v1"
 environment: ambient
-name: Vallum Release Captain
-description: "Writes plain-English release notes from the release record and closes the request issue."
 
 components:
   - name: release_captain
@@ -16,7 +14,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_issue, get_merge_request, get_repository_file, create_issue_note, update_issue]
-    max_cycles: 10
     ui_log_events: [on_agent_final_answer, on_tool_execution_success, on_tool_execution_failed]
 
 prompts:

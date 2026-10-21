@@ -2,8 +2,6 @@
 # merge request pipeline fails (at most 2 attempts per merge request, counted by code).
 version: "v1"
 environment: ambient
-name: Vallum Pipeline Medic
-description: "Reads the real failing job logs of a Vallum merge request and fixes the cause with one commit."
 
 components:
   - name: medic
@@ -15,7 +13,6 @@ components:
       - from: "context:project_id"
         as: project_id
     toolset: [get_merge_request, get_pipeline_failing_jobs, get_job_logs, list_merge_request_diffs, get_repository_file, create_commit, create_merge_request_note]
-    max_cycles: 25
     ui_log_events: [on_agent_final_answer, on_tool_execution_success, on_tool_execution_failed]
 
 prompts:

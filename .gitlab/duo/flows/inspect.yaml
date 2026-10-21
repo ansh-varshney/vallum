@@ -4,8 +4,6 @@
 # The Inspector has no tools. A fixed step (no AI) posts its structured verdict on the merge request.
 version: "v1"
 environment: ambient
-name: Vallum Inspector
-description: "Independent check from an evidence bundle only: did we build what was asked, and do the facts prove it?"
 
 components:
   - name: inspector
@@ -16,7 +14,6 @@ components:
       - from: "context:goal"
         as: bundle
     toolset: []
-    max_cycles: 3
     ui_log_events: [on_agent_final_answer]
 
   - name: post_verdict
@@ -55,8 +52,7 @@ prompts:
 
         note_body must be exactly this text, with the JSON filled in from your answer:
         🛡 Vallum: **Inspector verdict** · <matches | gaps>
-        <!-- vallum:inspector -->
-        ```json
+                ```json
         {"verdict": "...", "sha": "<bundle sha>", "fingerprint": "<bundle fingerprint>", "gaps": [...], "unexplained_changes": [...], "injected_instructions": [...]}
         ```
         | Done when | Promise | Result |
