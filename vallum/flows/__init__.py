@@ -13,7 +13,7 @@ from vallum.config import ROOT, iso
 
 FLOWS = {
     # key: (file, trigger types created when the flow is enabled)
-    "ship": ("ship.yaml", ["assign_reviewer"]),
+    "ship": ("ship.yaml", ["assign_reviewer"]),   # Door B; Door A (status -> In progress) is added below
     "inspect": ("inspect.yaml", []),
     "medic": ("medic.yaml", []),
     "release": ("release.yaml", []),
@@ -21,6 +21,11 @@ FLOWS = {
 }
 FLOWS_DIR = ROOT / ".gitlab" / "duo" / "flows"
 REGISTRY = "vallum_flows"
+WORK_ITEM_EVENT = 7   # GitLab's event type number for work item events (seen on UI-made triggers)
+DOOR_A_FILTER = {"work_item": {"rules": [
+    {"field": "action", "value": ["status_changed"], "operator": "in"},
+    {"field": "status.name", "value": ["In progress"], "operator": "in"},
+]}}
 
 
 def gid(kind: str, num) -> str:
@@ -46,6 +51,8 @@ CONSUMERS_Q = """query($projectId: ProjectID!, $itemId: AiCatalogItemID) {
   aiCatalogConfiguredItems(projectId: $projectId, itemId: $itemId) {
     nodes { id enabled serviceAccount { id username } item { id name }
             flowTriggers { id eventTypes description active } } } }"""
+TRIGGER_M = """mutation($input: AiFlowTriggerCreateInput!) { aiFlowTriggerCreate(input: $input) {
+  aiFlowTrigger { id eventTypes filter } errors } }"""
 CONSUMER_M = """mutation($input: AiCatalogItemConsumerCreateInput!) { aiCatalogItemConsumerCreate(input: $input) {
   itemConsumer { id serviceAccount { id username } } errors warnings } }"""
 
@@ -85,7 +92,8 @@ class Flows:
         action = "unchanged"
         if not item_id:
             res = self.gl.graphql(CREATE_M, {"input": {"projectId": self.project_gid, "name": name, "description": desc,
-                                                       "definition": text, "release": True}})["aiCatalogFlowCreate"]
+                                                       "definition": text, "release": True,
+                                                       "visibility": "PRIVATE"}})["aiCatalogFlowCreate"]
             if res["errors"]:
                 raise RuntimeError(f"{key}: create failed: {res['errors']}")
             item_id, action = res["item"]["id"], "created"
@@ -96,6 +104,8 @@ class Flows:
                 raise RuntimeError(f"{key}: update failed: {res['errors']}")
             action = "updated"
         consumer = self.ensure_enabled(key, item_id)
+        if key == "ship":
+            consumer = self.ensure_door_a(consumer) or consumer
         reg.update(item_id=item_id, definition_sha=sha, name=name, published_at=iso(),
                    consumer_id=num(consumer["id"]), consumer_gid=consumer["id"],
                    service_account=(consumer.get("serviceAccount") or {}).get("username"),
@@ -116,6 +126,26 @@ class Flows:
             print(f"[flows] {key}: {w}")
         nodes = self.gl.graphql(CONSUMERS_Q, {"projectId": self.project_gid, "itemId": item_id})["aiCatalogConfiguredItems"]["nodes"]
         return nodes[0] if nodes else res["itemConsumer"]
+
+    def ensure_door_a(self, consumer: dict) -> dict | None:
+        """Door A: a member moves a work item to In progress (member-only event, FR-DOOR-1)."""
+        if any(WORK_ITEM_EVENT in (t.get("eventTypes") or []) for t in consumer.get("flowTriggers") or []):
+            return None
+        import os
+
+        inp = {"projectPath": os.environ.get("CI_PROJECT_PATH", "gitlab-ai-hackathon/transcend-october-2026/43503198/vallum"),
+               "description": "Vallum Door A: a Feature issue is moved to In progress",
+               "eventTypes": [WORK_ITEM_EVENT], "aiCatalogItemConsumerId": consumer["id"], "filter": DOOR_A_FILTER}
+        sa = (consumer.get("serviceAccount") or {}).get("id")
+        if sa:
+            inp["userId"] = sa
+        res = self.gl.graphql(TRIGGER_M, {"input": inp})["aiFlowTriggerCreate"]
+        if res["errors"]:
+            raise RuntimeError(f"ship: Door A trigger failed: {res['errors']}")
+        print(f"[flows] created Door A trigger {res['aiFlowTrigger']['id']}")
+        nodes = self.gl.graphql(CONSUMERS_Q, {"projectId": self.project_gid, "itemId": consumer["item"]["id"]})
+        found = nodes["aiCatalogConfiguredItems"]["nodes"]
+        return found[0] if found else None
 
     # ------------------------------------------------------------ starting
     def start(self, key: str, goal: dict | str, issue_id: int | None = None) -> dict:

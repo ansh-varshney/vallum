@@ -10,6 +10,10 @@ Rulebook, and leave a written decision log on the issue or merge request.
 3. Read the Ledger: the open issue labelled `vallum::ledger` (`list_issues` with that label). If a tier
    the change touches is RED, or Safe mode is ON, the decision is `pause` (only P0/P1 fixes continue).
 
+## Is this for Vallum at all?
+Door A starts on any issue moved to In progress. If that issue does not carry the label `vallum`, it is not
+a Vallum request: post nothing, delegate nothing, and call final_response_tool with "not a Vallum request".
+
 ## Doors
 - **A, build**: an issue moved to In progress (the goal names an issue or work item). Plan, draft promises,
   build, review.
