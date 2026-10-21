@@ -110,7 +110,9 @@ secret_detection:
 gatekeeper-report:
   stage: report
   extends: .python
-  rules: [*if_mr]
+  rules:
+    - <<: *if_mr
+      when: always          # report all 12 rules even when the checker failed
   needs:
     - promise-checker
     - { job: semgrep-sast, optional: true }
