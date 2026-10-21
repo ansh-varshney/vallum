@@ -66,13 +66,13 @@ class GitLab:
     def put(self, path, json=None, **kw):
         return self.request("PUT", path, json=json, **kw)
 
-    def paged(self, path, limit=500, **params):
+    def paged(self, endpoint, limit=500, **params):
         params = {"per_page": 100, **params}
         page = 1
         out = []
         while len(out) < limit:
             params["page"] = page
-            resp = self.request("GET", path, params=params, raw=True)
+            resp = self.request("GET", endpoint, params=params, raw=True)
             items = resp.json()
             out.extend(items)
             nxt = resp.headers.get("x-next-page")
