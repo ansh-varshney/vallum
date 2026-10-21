@@ -101,7 +101,7 @@ def local_load(client, routes: set[str], per_route: int, api_key: str | None) ->
     expanded = set()
     for route in routes:
         if route == "*":
-            expanded.update({"GET /healthz", "GET /r/{code}"})
+            expanded.update({"GET /health", "GET /r/{code}"})
         else:
             expanded.add(route)
     for route in sorted(expanded):

@@ -196,7 +196,7 @@ class Drive:
         needs = self.needs(metric)
         max_rps = float(self.pol["simulate"]["max_rps"])
         seconds = max(12.0, sum(n * 1.3 for r, n in needs.items() if r != "*") / (max_rps * 0.8))
-        rates = plan_rates(needs, 1.0, seconds, 0, max_rps, {}) or {"GET /healthz": 20}
+        rates = plan_rates(needs, 1.0, seconds, 0, max_rps, {}) or {"GET /health": 20}
         v = Visitors(cand_url, fresh, key)
         asyncio.run(v.run(rates, seconds))
         warm = [s for s in v.samples if s.get("t", 0) >= 2.0]   # skip connection set-up in the first seconds

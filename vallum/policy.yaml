@@ -63,7 +63,7 @@ simulate:
   base_rps: 20
   max_rps: 150
   step0_requests: 300
-  mix: { "GET /r/{code}": 0.85, "GET /api/links/{code}": 0.08, "GET /healthz": 0.05, "POST /api/links": 0.02 }
+  mix: { "GET /r/{code}": 0.85, "GET /api/links/{code}": 0.08, "GET /health": 0.05, "POST /api/links": 0.02 }
 
 watchdog:
   deadlines_min: { planning: 15, building: 30, reviewing: 15, gated: 10, merged: 10, driving_extra: 10 }

@@ -9,14 +9,14 @@ promises:
     severity: blocker
   - id: app-healthy
     type: operability
-    says: "/healthz answers 200"
-    steps: ["GET /healthz -> 200 contains ok"]
+    says: "/health answers 200"
+    steps: ["GET /health -> 200 contains ok"]
     where: [mr, drive, live]
     severity: blocker
   - id: app-tags-revision
     type: operability
     says: "Every response says which revision served it"
-    steps: ["GET /healthz -> 200 header x-revision"]
+    steps: ["GET /health -> 200 header x-revision"]
     where: [mr, drive]
     severity: blocker
   - id: app-no-ip-logging

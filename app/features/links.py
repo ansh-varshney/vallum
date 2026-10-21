@@ -11,7 +11,8 @@ from app.store import LinkExists
 
 router = APIRouter()
 
-ALPHABET = string.ascii_letters + string.digits
+# No "z": Cloud Run reserves some URL paths that end in z (e.g. /healthz).
+ALPHABET = "".join(c for c in string.ascii_letters + string.digits if c not in "zZ")
 CODE_LENGTH = 7
 
 

@@ -26,7 +26,7 @@ def wait_for_port(host: str, port: int, timeout: float = 90) -> bool:
 
 @contextmanager
 def local_app(source_dir: Path, port: int, extra_env: dict | None = None, log_path: Path | None = None):
-    """Run uvicorn from source_dir and yield its base URL once /healthz answers."""
+    """Run uvicorn from source_dir and yield its base URL once /health answers."""
     env = {**os.environ, "APP_LOG_REQUESTS": "0", "K_REVISION": f"local-{port}", **(extra_env or {})}
     env.pop("K_SERVICE", None)
     log = open(log_path, "wb") if log_path else subprocess.DEVNULL
@@ -41,12 +41,12 @@ def local_app(source_dir: Path, port: int, extra_env: dict | None = None, log_pa
             if proc.poll() is not None:
                 raise RuntimeError(f"the app in {source_dir} exited with code {proc.returncode} before it was ready")
             try:
-                if httpx.get(base + "/healthz", timeout=2).status_code < 500:
+                if httpx.get(base + "/health", timeout=2).status_code < 500:
                     break
             except httpx.HTTPError:
                 pass
             if time.monotonic() > deadline:
-                raise RuntimeError(f"the app in {source_dir} did not answer /healthz within 60 s")
+                raise RuntimeError(f"the app in {source_dir} did not answer /health within 60 s")
             time.sleep(0.5)
         yield base
     finally:

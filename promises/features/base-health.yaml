@@ -5,14 +5,14 @@ kind: config-infra
 tier: standard
 priority: P2
 owns:
-  routes: ["GET /healthz"]
+  routes: ["GET /health"]
   files: [app/features/health.py]
 flag: null
 promises:
   speed:
     - id: health-fast
       says: "95% of health checks finish in under 200 ms"
-      measure: "p95(latency, route='GET /healthz') < 200ms"
+      measure: "p95(latency, route='GET /health') < 200ms"
       where: [mr, drive, live]
       severity: major
   cost:
@@ -24,6 +24,6 @@ promises:
   operability:
     - id: health-reports-revision
       says: "The health check reports which revision answered"
-      steps: ["GET /healthz -> 200 contains revision"]
+      steps: ["GET /health -> 200 contains revision"]
       where: [mr, drive, live]
       severity: major

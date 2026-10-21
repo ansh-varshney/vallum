@@ -55,7 +55,7 @@ def test_overall_rules():
 
 
 def test_rates_reach_the_sample_on_a_small_share():
-    rates = plan_rates({"GET /r/{code}": 100, "*": 200}, 0.10, 55, 20, 150, {"GET /r/{code}": 0.85, "GET /healthz": 0.15})
+    rates = plan_rates({"GET /r/{code}": 100, "*": 200}, 0.10, 55, 20, 150, {"GET /r/{code}": 0.85, "GET /health": 0.15})
     assert rates["GET /r/{code}"] * 0.10 * 55 >= 100
     capped = plan_rates({"GET /r/{code}": 200}, 0.01, 115, 20, 150, {"GET /r/{code}": 1.0})
     assert sum(capped.values()) <= 150.01

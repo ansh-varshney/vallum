@@ -31,8 +31,8 @@ def main():
 
     url = config.service_url(pol)
     try:
-        resp = httpx.get(url + "/healthz", timeout=20)
-        print(f"Live check: {url}/healthz -> {resp.status_code} {resp.headers.get('x-revision')}")
+        resp = httpx.get(url + "/health", timeout=20)
+        print(f"Live check: {url}/health -> {resp.status_code} {resp.headers.get('x-revision')}")
     except httpx.HTTPError as exc:
         print(f"Live check failed: {exc}")
     notify.ledger()

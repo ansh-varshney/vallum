@@ -39,10 +39,10 @@ def test_odd_codes_are_refused(client):
 
 
 def test_every_response_names_revision_and_route(client):
-    r = client.get("/healthz")
+    r = client.get("/health")
     assert r.status_code == 200 and r.json()["ok"] is True
     assert r.headers["x-revision"] == "local"
-    assert r.headers["x-route"] == "GET /healthz"
+    assert r.headers["x-route"] == "GET /health"
     assert client.get("/r/zzz").headers["x-route"] == "GET /r/{code}"
 
 

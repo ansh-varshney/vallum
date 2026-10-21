@@ -3,7 +3,7 @@
     "POST /api/links {url: 'https://example.com/{rand}'} -> 201 => link"
     "GET /r/{link.code} -> 302 https://example.com/{rand}"
     "anon POST /api/links {url: 'https://example.com'} -> 401"
-    "GET /healthz -> 200 contains ok"        "GET /healthz -> 200 header x-revision"
+    "GET /health -> 200 contains ok"        "GET /health -> 200 header x-revision"
 
 {rand} is random per promise run; {name.field} reads a saved JSON answer. Write requests carry
 the API key unless the step starts with "anon".
