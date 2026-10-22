@@ -140,11 +140,19 @@ class Desk:
         """Start a flow for this MR unless one is already running for the same change."""
         target = f"{MR}-{mr['iid']}"
         tl = self.store.timeline(target)
+        wait_min = float(self.pol["watchdog"]["deadlines_min"].get("reviewing", 15))
+        # one live agent session per merge request, of any kind (B19: one live lease per item)
+        for other_kind, other in (tl.get("sessions") or {}).items():
+            begun = parse_iso(other.get("at"))
+            if begun and utcnow() - begun < timedelta(minutes=wait_min * 2):
+                status = self.flows.session_status(other.get("id"))
+                if status not in DONE and status not in DEAD:
+                    self.log(f"!{mr['iid']}: {other_kind} session {other.get('id')} is {status or 'running'}; waiting")
+                    return False
         sess = (tl.get("sessions") or {}).get(kind) or {}
         started = parse_iso(sess.get("at"))
-        wait_min = float(self.pol["watchdog"]["deadlines_min"].get("reviewing", 15))
         if sess.get("fp") == fp and started and utcnow() - started < timedelta(minutes=wait_min):
-            self.log(f"!{mr['iid']}: {kind} session {sess.get('id')} still running")
+            self.log(f"!{mr['iid']}: {kind} session {sess.get('id')} already ran on this exact change")
             return False
         if self.runs_left(tl) <= 0:
             self.log(f"!{mr['iid']}: flow-run cap reached")
@@ -175,7 +183,10 @@ class Desk:
         found = verdicts.latest(self.gl.notes(MR, iid), self.flows.bots())
         fp = evidence.fingerprint(self.gl.mr_changes(iid))
         built_by_vallum = bool(context.agent_authors(self.gl, iid))
-        if mr.get("detailed_merge_status") == "requested_changes":
+        reviewers = self.gl.get(f"/projects/:id/merge_requests/{iid}/reviewers") or []
+        changes_requested = (mr.get("detailed_merge_status") == "requested_changes"
+                             or any(r.get("state") == "requested_changes" for r in reviewers))
+        if changes_requested:
             # a reviewer (often GitLab Duo Code Review) asked for changes: GitLab won't merge until they're answered
             goal = {"door": "A" if built_by_vallum else "B", "mode": "fix" if built_by_vallum else "review",
                     "merge_request_iid": iid,
