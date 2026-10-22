@@ -199,6 +199,9 @@ def rule5(ctx: GateContext) -> Rule:
 
 
 def rule6(ctx: GateContext) -> Rule:
+    if ctx.rebased is False and ctx.mode == "report":
+        # main moving under an MR is normal; the Merge Desk rebases before it merges
+        return Rule(6, DEFERRED, "main has moved on; the Merge Desk rebases and re-checks before merging")
     if ctx.rebased is False:
         return Rule(6, FAIL, "not rebased on the latest main")
     if ctx.pipeline_ok is None:

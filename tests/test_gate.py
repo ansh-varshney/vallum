@@ -107,6 +107,7 @@ def test_deploy_caps():
 
 def test_stale_or_failed_pipeline():
     assert statuses(rules.evaluate(ctx(rebased=False)))[6] == "fail"
+    assert statuses(rules.evaluate(ctx(rebased=False, mode="report", pipeline_ok=None)))[6] == "deferred"
     assert statuses(rules.evaluate(ctx(pipeline_sha="old")))[6] == "fail"
     assert statuses(rules.evaluate(ctx(pipeline_ok=False)))[6] == "fail"
 
