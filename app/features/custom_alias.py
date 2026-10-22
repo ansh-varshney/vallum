@@ -14,6 +14,16 @@ router = APIRouter()
 ALIAS_PATTERN = re.compile(r"[A-Za-z0-9-]{1,64}")
 
 
+def _host(url: str) -> str:
+    """The host part of an http(s) url, or \"\" when there is none."""
+    rest = url.split("://", 1)[1]
+    netloc = re.split(r"[/?#]", rest, maxsplit=1)[0]
+    netloc = netloc.rsplit("@", 1)[-1]
+    if netloc.startswith("["):
+        return netloc.split("]", 1)[0].lstrip("[")
+    return netloc.split(":", 1)[0]
+
+
 class NewAlias(BaseModel):
     alias: str
     url: str
@@ -29,8 +39,12 @@ class NewAlias(BaseModel):
     @classmethod
     def http_only(cls, value: str) -> str:
         value = value.strip()
-        if not value.lower().startswith(("http://", "https://")) or len(value) > 2048 or " " in value:
+        if not value.lower().startswith(("http://", "https://")) or len(value) > 2048:
             raise ValueError("url must be an http(s) address under 2048 characters")
+        if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("url must not contain whitespace or control characters")
+        if not _host(value):
+            raise ValueError("url must have a host after the scheme")
         return value
 
 

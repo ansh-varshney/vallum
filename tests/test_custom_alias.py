@@ -54,7 +54,20 @@ def test_alias_length_limit(client):
 
 
 def test_only_http_urls(client):
-    for bad in ["javascript:alert(1)", "ftp://example.com", "https://a b", "x" * 10]:
+    for bad in [
+        "javascript:alert(1)",
+        "ftp://example.com",
+        "https://a b",
+        "x" * 10,
+        "https://example.com/a\tb",
+        "https://example.com/a\nb",
+        "https://example.com/a\x00b",
+        "https://example.com/a\x7fb",
+        "http://",
+        "https://",
+        "https:///path",
+        "http://:80/",
+    ]:
         assert post(client, "test-url", bad).status_code == 422, bad
 
 
