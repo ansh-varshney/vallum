@@ -257,6 +257,17 @@ class Desk:
             return  # already handled for this commit
         attempts = int(tl.get("medic_attempts", 0))
         cap = int(self.pol["releases"]["max_fix_attempts"])
+        if mr.get("diverged_commits_count", 0) > 0 and tl.get("rebased_failed_sha") != mr["sha"]:
+            # main may already have fixed it (a newer checker, a fixed test): rebase first, it costs no credits
+            self.store.set_timeline(target, rebased_failed_sha=mr["sha"])
+            try:
+                self.gl.put(f"/projects/:id/merge_requests/{mr['iid']}/rebase")
+                self.notify.status(MR, mr["iid"], "Rebased on main", "done", note="before the Medic", title=mr["title"],
+                                   now="The pipeline failed; main has moved, so Vallum rebased first and runs the checks again.")
+                self.log(f"!{mr['iid']}: failed but behind main: rebased instead of calling the Medic")
+                return
+            except GitLabError as exc:
+                self.log(f"!{mr['iid']}: rebase before Medic failed: {exc}")
         hp = mr.get("head_pipeline") or {}
         if attempts >= cap or not self.pol.get("gate", {}).get("agent_verdicts_required"):
             self.store.set_timeline(target, medic_sha=mr["sha"], blocked_sha=mr["sha"])
@@ -290,7 +301,6 @@ class Desk:
         ctx.reviewer_verdict, ctx.reviewer_author = review.get("verdict"), review.get("author")
         ctx.inspector = insp or None
         ctx.fingerprint = evidence.fingerprint(self.gl.mr_changes(mr["iid"]))
-        ctx.learned_writer = self.flows.bots().get(mr["author"]["username"]) == "incident"
         ctx.modes = self.store.doc("modes")
         ctx.safe_mode = bool(self.store.doc("meta").get("safe_mode"))
         ctx.queue_head = True

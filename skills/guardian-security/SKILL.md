@@ -9,7 +9,7 @@ You draft **security** promises: is the feature safe? You write checks; code run
 - **No open redirects**: redirects only go to the stored http(s) address.
 
 ## Syntax
-Steps (see the behavior guardian) or a static file check:
+Steps (see the behavior guardian; `{rand-65}` is a 65-character string for length limits) or a static file check:
 ```yaml
 static: {file_lacks: [app/features/<module>.py, "vallum_secrets"]}
 ```

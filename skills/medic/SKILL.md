@@ -13,6 +13,9 @@ MR's branch. You get at most 2 attempts per pipeline; code counts them.
      loosen or delete the promise.
    - **Fail-first failed** (a new promise passes on main): the promise tests nothing new. Rewrite that
      promise's steps so they exercise the new route; keep its id, severity and `where`.
+   - **A step can't be read** (the checker says "can't read step" or "not a YAML mapping"): rewrite only that
+     step in valid syntax with the same meaning (literal values; `{rand-N}` for long strings). Keep the
+     promise's id, severity, `where` and expected status.
    - **Gatekeeper rule 5** (protected path) or anything outside the feature's files: do not fix. Report.
    - **Infrastructure** (runner, network, image pull): do not change code. Report "retry".
 5. One `create_commit` on the source branch (`action: update`, full new content), message

@@ -58,6 +58,18 @@ def author_facts(gl, author: dict) -> tuple[int | None, bool | None]:
     return access, bot
 
 
+def agent_authors(gl, iid: int) -> list[str]:
+    """Names of Vallum agents that authored commits in this MR (service accounts of our flows)."""
+    names = []
+    for c in gl.paged(f"/projects/:id/merge_requests/{iid}/commits"):
+        email = (c.get("author_email") or "").lower()
+        name = c.get("author_name") or ""
+        if "service_account" in email or name.startswith("Vallum "):
+            if name not in names:
+                names.append(name)
+    return names
+
+
 def is_rebased(gl, sha: str) -> bool:
     main_head = gl.branch_head(os.environ.get("CI_DEFAULT_BRANCH", "main"))
     return gl.merge_base(main_head, sha) == main_head
@@ -101,6 +113,7 @@ def build(gl, mr: dict, mode: str, local_root: Path | None = None) -> GateContex
         pipeline_ok = hp.get("status") == "success"
         checker, findings, _jobs = pipeline_facts(gl, mr)
 
+    agents = agent_authors(gl, mr["iid"])
     labels = set(mr.get("labels", []))
     priority = next((lb.split("::", 1)[1] for lb in labels if lb.startswith("priority::")), None)
     subjects = [c for n, c in branch_cards.cards.items() if branch_cards.paths.get(n) in files]
@@ -113,5 +126,6 @@ def build(gl, mr: dict, mode: str, local_root: Path | None = None) -> GateContex
         main_cards=main_cards, branch_cards=branch_cards, sha=sha, author_access=access, author_is_bot=bot,
         changed_lines=lines, added_files=added, deploy_service_text=deploy_text, rebased=is_rebased(gl, sha),
         pipeline_ok=pipeline_ok, pipeline_sha=pipeline_sha, checker=checker, security_findings=findings,
-        priority=priority, is_fix=is_fix,
+        priority=priority, is_fix=is_fix, agent_made=bool(agents), agent_names=agents,
+        learned_writer=bool(agents) and all(n == "Vallum Incident Commander" for n in agents),
     )

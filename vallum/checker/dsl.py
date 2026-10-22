@@ -5,8 +5,9 @@
     "anon POST /api/links {url: 'https://example.com'} -> 401"
     "GET /health -> 200 contains ok"        "GET /health -> 200 header x-revision"
 
-{rand} is random per promise run; {name.field} reads a saved JSON answer. Write requests carry
-the API key unless the step starts with "anon".
+{rand} is random per promise run; {rand-N} is a random string of exactly N characters (for length limits);
+{name.field} reads a saved JSON answer. Write requests carry the API key unless the step starts with "anon".
+An expectation may hold several checks: "-> 201 json code=x json url=https://a json short_url contains ok".
 """
 
 import re
@@ -21,7 +22,8 @@ _STEP = re.compile(
     r"^(?:(?P<anon>anon)\s+)?(?P<method>GET|POST|PUT|PATCH|DELETE|HEAD)\s+(?P<path>\S+)"
     r"(?:\s+(?P<body>\{.*\}))?\s*->\s*(?P<status>\d{3})(?:\s+(?P<expect>.*?))?(?:\s*=>\s*(?P<save>[A-Za-z_]\w*))?\s*$"
 )
-_PLACEHOLDER = re.compile(r"\{(rand|[A-Za-z_]\w*\.[A-Za-z_]\w*)\}")
+_PLACEHOLDER = re.compile(r"\{(rand(?:-\d{1,5})?|[A-Za-z_]\w*\.[A-Za-z_]\w*)\}")
+_CLAUSE = re.compile(r"(?:^|\s)(contains|header|json)\s")
 
 
 @dataclass
@@ -40,6 +42,9 @@ def substitute(text: str, ctx: dict) -> str:
         key = m.group(1)
         if key == "rand":
             return ctx["rand"]
+        if key.startswith("rand-"):
+            size = int(key[5:])
+            return (ctx["rand"] * (size // len(ctx["rand"]) + 1))[:size]
         name, fieldname = key.split(".", 1)
         value = (ctx.get(name) or {}).get(fieldname)
         if value is None:
@@ -53,16 +58,36 @@ def parse_step(text: str) -> Step:
     m = _STEP.match(text.strip())
     if not m:
         raise ValueError(f"can't read step {text!r}; expected 'METHOD /path [body] -> STATUS [expectation]'")
-    body = yaml.safe_load(m["body"]) if m["body"] else None
+    try:
+        body = yaml.safe_load(m["body"]) if m["body"] else None
+    except yaml.YAMLError as exc:
+        raise ValueError(f"the body of {text!r} is not a YAML mapping ({str(exc).splitlines()[0]}); "
+                         "use literal values, and {rand-N} for long strings") from exc
     if body is not None and not isinstance(body, dict):
         raise ValueError(f"step body must be a mapping: {text!r}")
     return Step(bool(m["anon"]), m["method"], m["path"], body, int(m["status"]), (m["expect"] or "").strip(), m["save"])
 
 
+def clauses(expect: str) -> list[str]:
+    """Split "json a=1 json b contains x" into ["json a=1", "json b", "contains x"]."""
+    expect = expect.strip()
+    starts = [m.start(1) for m in _CLAUSE.finditer(expect)]
+    if not starts or starts[0] != 0:
+        starts = [0] + starts
+    return [expect[a:b].strip() for a, b in zip(starts, starts[1:] + [len(expect)]) if expect[a:b].strip()]
+
+
 def _check_expectation(step: Step, resp) -> str | None:
     if resp.status_code != step.status:
         return f"expected {step.status}, got {resp.status_code}"
-    exp = step.expect
+    for clause in clauses(step.expect):
+        problem = _check_clause(step, resp, clause)
+        if problem:
+            return problem
+    return None
+
+
+def _check_clause(step: Step, resp, exp: str) -> str | None:
     if not exp:
         return None
     if exp.startswith("contains "):
@@ -78,13 +103,20 @@ def _check_expectation(step: Step, resp) -> str | None:
             return f"header {name.strip()} is {got!r}, expected {value.strip()!r}"
         return None
     if exp.startswith("json "):
-        name, _, value = exp[len("json "):].partition("=")
+        name, has_value, value = exp[len("json "):].partition("=")
         try:
-            got = resp.json().get(name.strip())
+            data = resp.json()
         except Exception:
             return "answer isn't JSON"
+        if not isinstance(data, dict) or name.strip() not in data:
+            return f"answer has no field {name.strip()!r}"
+        if not has_value:
+            return None
+        got = data.get(name.strip())
         return None if str(got) == value.strip() else f"{name.strip()} is {got!r}, expected {value.strip()!r}"
     if 300 <= step.status < 400:
+        if exp.lower().startswith("location:"):
+            exp = exp.split(":", 1)[1].strip()
         loc = resp.headers.get("location")
         return None if loc == exp else f"redirects to {loc!r}, expected {exp!r}"
     return None if exp in resp.text else f"answer doesn't contain {exp!r}"

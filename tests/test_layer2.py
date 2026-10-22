@@ -140,3 +140,31 @@ def test_inspector_has_no_tools_and_reviewer_cannot_edit_code():
     for g in ("guardian_behavior", "guardian_speed", "guardian_reliability", "guardian_security"):
         assert tools[g] == {"get_repository_file"}
     assert copy.deepcopy(tools)
+
+
+def test_dsl_handles_what_agents_actually_wrote(client):
+    from vallum.checker import dsl
+
+    # several checks in one step, existence-only json check, Location: prefix, {rand-N}
+    ok, detail = dsl.run_steps(client, [
+        "POST /api/links {url: 'https://example.com/{rand}'} -> 201 json url=https://example.com/{rand} json short_url json code => link",
+        "GET /r/{link.code} -> 302 Location: https://example.com/{rand}",
+        "POST /api/links {url: 'https://example.com/{rand-2100}'} -> 422",
+    ], "test-key")
+    assert ok, detail
+    ok, detail = dsl.run_steps(client, ["POST /api/links {url: 'https://x'} -> 201 json nope"], "test-key")
+    assert not ok and "no field 'nope'" in detail
+    # an expression in a body is a broken promise with a clear reason, never a crash
+    ok, detail = dsl.run_steps(client, ["POST /api/links {url: 'https://a.com/' + 2100 x chars} -> 422"], "test-key")
+    assert not ok and "not a YAML mapping" in detail
+
+
+def test_agent_commits_take_away_owner_exceptions():
+    files = ["vallum/policy.yaml", "app/features/version.py", "promises/features/5-version.yaml"]
+    human = ctx(files=files)
+    assert statuses(rules.evaluate(human))[5] == "pass"
+    # same MR "authored" by the owner (composite identity) but committed by a Vallum agent
+    agent = ctx(files=files, agent_made=True, agent_names=["Vallum Ship"])
+    report = rules.evaluate(agent)
+    assert statuses(report)[5] == "fail"
+    assert "made by Vallum Ship" in report["rules"][0]["detail"] and statuses(report)[1] == "pass"

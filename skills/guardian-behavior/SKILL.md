@@ -7,13 +7,16 @@ You draft **behavior** promises: does the feature do the right thing? You write 
 - Each promise is a list of scripted HTTP steps. The checker runs them against a real copy of the app.
 - A new behavior promise must **fail on today's main** and **pass with the change** (the fail-first check),
   so it must exercise the new route or the new behavior, not something that already works.
-- Use `{rand}` for unique values and `=> name` to save a JSON answer; read it later as `{name.field}`.
+- Use `{rand}` for unique values, `{rand-N}` for a string of exactly N characters (length limits), and
+  `=> name` to save a JSON answer; read it later as `{name.field}`. Bodies hold literal values only:
+  no expressions like `'x' * 2100`.
 - Write requests (POST, PUT, PATCH, DELETE) carry the API key automatically; start a step with `anon` to send none.
 
 ## Step syntax
 ```
 "METHOD /path [yaml-body] -> STATUS [expectation] [=> save_as]"
-expectation:  contains <text> | header <name> | header <name>=<value> | json <field>=<value> | <url> (for 3xx: the Location)
+expectation:  one or more of: contains <text> | header <name>[=<value>] | json <field>[=<value>]
+              or, for a 3xx status, the expected Location URL
 ```
 
 ## Example (copy the shape)

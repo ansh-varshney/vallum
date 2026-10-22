@@ -59,6 +59,8 @@ class GateContext:
     added_files: list = field(default_factory=list)
     learned_writer: bool = False               # author is the Incident Commander's bot (may ADD learned promises)
     fingerprint: str | None = None             # the MR's own changes, stable across rebases
+    agent_made: bool = False                   # any commit authored by a Vallum flow's service account
+    agent_names: list = field(default_factory=list)
     deploy_service_text: str | None = None     # deploy/service.yaml on the branch, if changed
     rebased: bool | None = None
     pipeline_ok: bool | None = None
@@ -82,7 +84,10 @@ class GateContext:
     # derived -------------------------------------------------------------------
     @property
     def by_owner(self) -> bool:
-        return self.author.get("username") in self.policy.owners and self.author_is_bot is not True
+        """Owner exceptions need the owner's own commits. Flows act with a composite identity, so an
+        agent's MR can show the owner as its author; the commit authors tell the truth."""
+        return (self.author.get("username") in self.policy.owners and self.author_is_bot is not True
+                and not self.agent_made)
 
     def subject_cards(self) -> list[tuple[str, dict]]:
         """Cards this MR adds or changes; if none, the cards of the features whose code it touches."""
@@ -110,6 +115,9 @@ def _is_protected(path: str, protected: list[str]) -> bool:
 
 
 def rule1(ctx: GateContext) -> Rule:
+    if ctx.agent_made and ctx.author_access is not None and ctx.author_access >= DEVELOPER:
+        return Rule(1, PASS, f"made by {', '.join(ctx.agent_names)} for @{ctx.author.get('username')} "
+                             f"(access level {ctx.author_access})")
     if ctx.author_is_bot:
         # Agent bots act for the member who started them; that member is checked at the start event.
         return Rule(1, PASS, f"@{ctx.author.get('username')} is a Vallum agent account working for a member")
