@@ -174,12 +174,23 @@ class Desk:
         iid = mr["iid"]
         found = verdicts.latest(self.gl.notes(MR, iid), self.flows.bots())
         fp = evidence.fingerprint(self.gl.mr_changes(iid))
+        built_by_vallum = bool(context.agent_authors(self.gl, iid))
+        if mr.get("detailed_merge_status") == "requested_changes":
+            # a reviewer (often GitLab Duo Code Review) asked for changes: GitLab won't merge until they're answered
+            goal = {"door": "A" if built_by_vallum else "B", "mode": "fix" if built_by_vallum else "review",
+                    "merge_request_iid": iid,
+                    "why": "A reviewer requested changes on this merge request. Address every open point: "
+                           "fix the code (Vallum-built MRs) or answer it in the Reviewer verdict."}
+            if self.kick(mr, "fix", "ship", goal, fp):
+                self.notify.status(MR, iid, "Review fixes", "running",
+                                   now="A reviewer requested changes; Vallum's Builder and Reviewer are addressing them.")
+            return None
         if not found.get("review"):
             age = utcnow() - (parse_iso(mr.get("created_at")) or utcnow())
             if age < timedelta(minutes=8):
                 self.log(f"!{iid}: young MR; giving the Ship flow's Reviewer time to post")
                 return None
-            goal = {"door": "B", "mode": "review", "merge_request_iid": iid,
+            goal = {"door": "A" if built_by_vallum else "B", "mode": "review", "merge_request_iid": iid,
                     "why": "The Merge Desk found no Reviewer verdict on this merge request."}
             if self.kick(mr, "review", "ship", goal, fp):
                 self.notify.status(MR, iid, "Review", "running", now="The Reviewer is reviewing this merge request.")

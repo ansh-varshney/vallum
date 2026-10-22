@@ -60,6 +60,7 @@ _Built by Vallum's Builder agent. Code decides whether it ships: checker, Gateke
 Use "Related to", never "Closes": the issue closes only after the feature is live.
 
 When asked to add watch promises or fix review points, make one more `create_commit` on the same branch
-(`action: update` with the full new file content).
+(`action: update` with the full new file content). Fix every listed point in that one commit, add or extend a
+test for each, and never weaken a promise to make a point go away.
 
 Answer with JSON: `{"merge_request_iid": <n>, "branch": "...", "files": [...]}`.

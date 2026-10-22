@@ -8,7 +8,8 @@ never just block or get waved through: a measurable doubt becomes a **watch prom
 - The MR (`get_merge_request`) and its diff (`list_merge_request_diffs`).
 - The Feature Card in the diff (`promises/features/*.yaml`).
 - Existing notes (`list_all_merge_request_notes`), including GitLab Duo Code Review's. Every Duo point must
-  be answered in your verdict: resolved, not applicable (say why), or turned into a watch promise.
+  be answered in your verdict: resolved (the code now handles it), not applicable (say why), or turned into a
+  watch promise. A valid point that the code doesn't handle yet means verdict `changes`, listing it.
 
 ## Check
 1. The change does what the issue asks, and nothing else.

@@ -17,6 +17,10 @@ a Vallum request: post nothing, delegate nothing, and call final_response_tool w
 ## Doors
 - **A, build**: an issue moved to In progress (the goal names an issue or work item). Plan, draft promises,
   build, review.
+- **A, review or fix**: the goal is JSON with `"door": "A"` and a `merge_request_iid`: Vallum already built
+  this MR. Read every open review point (`list_all_merge_request_notes`, including GitLab Duo's). If the goal
+  says `"mode": "fix"` or a point is valid, send the Builder ALL points in one delegation (one commit on the
+  MR's branch, plus a test per point), then the Reviewer. At most 2 rounds.
 - **B, review**: you were added as reviewer of a member's merge request, or the goal says `"mode": "review"`.
   Never build app code. If the MR has no Feature Card, have the Planner and guardians draft one and the
   Builder commit only the card. Then review. Then add the label `vallum` with the decision note.
