@@ -43,7 +43,7 @@ promises:
     - id: alias-url-length-limit
       says: "URLs over 2048 characters are rejected"
       steps:
-        - "POST /api/aliases {alias: 'test-{rand}', url: 'https://example.com/' + 2100 x chars} -> 422"
+        - "POST /api/aliases {alias: 'test-{rand}', url: 'https://example.com/{rand-2100}'} -> 422"
       where: [mr, drive]
       severity: major
     - id: alias-create-needs-key
@@ -103,7 +103,7 @@ promises:
       severity: blocker
     - id: alias-url-max-length
       says: "URLs are limited to 2048 characters"
-      steps: ["POST /api/aliases {url: 'https://example.com/' + 2100 chars, alias: 'x-{rand}'} -> 422"]
+      steps: ["POST /api/aliases {url: 'https://example.com/{rand-2100}', alias: 'x-{rand}'} -> 422"]
       where: [mr, drive]
       severity: blocker
     - id: alias-no-secrets
