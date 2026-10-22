@@ -1,0 +1,120 @@
+# Feature Card: custom aliases, choose your own short code.
+feature: custom-alias
+issue: 4
+kind: new-endpoint
+tier: standard
+priority: P2
+owns:
+  routes: ["POST /api/aliases"]
+  files: [app/features/custom_alias.py, tests/test_custom_alias.py]
+flag: custom_alias
+promises:
+  behavior:
+    - id: alias-redirects
+      says: "/r/promo goes to the right page"
+      steps:
+        - "POST /api/aliases {alias: 'promo-{rand}', url: 'https://example.com/target-{rand}'} -> 201 => alias"
+        - "GET /r/promo-{rand} -> 302 https://example.com/target-{rand}"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: alias-taken-is-refused
+      says: "Taken names get a clear error"
+      steps:
+        - "POST /api/aliases {alias: 'taken-{rand}', url: 'https://example.com/a'} -> 201"
+        - "POST /api/aliases {alias: 'taken-{rand}', url: 'https://example.com/b'} -> 409 contains alias already taken"
+      where: [mr, drive]
+      severity: major
+    - id: alias-valid-chars-only
+      says: "Only letters, digits and dashes are allowed"
+      steps:
+        - "POST /api/aliases {alias: 'bad alias', url: 'https://example.com/x'} -> 422"
+        - "POST /api/aliases {alias: 'bad_alias', url: 'https://example.com/x'} -> 422"
+        - "POST /api/aliases {alias: 'bad/alias', url: 'https://example.com/x'} -> 422"
+        - "POST /api/aliases {alias: 'good-alias-{rand}', url: 'https://example.com/x'} -> 201"
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-url-must-be-http
+      says: "Only http and https addresses are accepted"
+      steps:
+        - "POST /api/aliases {alias: 'test-{rand}', url: 'javascript:alert(1)'} -> 422"
+        - "POST /api/aliases {alias: 'test-{rand}', url: 'ftp://example.com'} -> 422"
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-url-length-limit
+      says: "URLs over 2048 characters are rejected"
+      steps:
+        - "POST /api/aliases {alias: 'test-{rand}', url: 'https://example.com/{rand-2100}'} -> 422"
+      where: [mr, drive]
+      severity: major
+    - id: alias-create-needs-key
+      says: "Creating an alias without the API key is refused"
+      steps:
+        - "anon POST /api/aliases {alias: 'test-{rand}', url: 'https://example.com/x'} -> 401"
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-response-shape
+      says: "Success response has the same public link shape as links"
+      steps:
+        - "POST /api/aliases {alias: 'shape-{rand}', url: 'https://example.com/target'} -> 201 json code=shape-{rand} json url=https://example.com/target json short_url"
+      where: [mr, drive, live]
+      severity: major
+  speed:
+    - id: alias-create-fast
+      says: "95% of alias creations finish in under 300 ms"
+      measure: "p95(latency, route='POST /api/aliases') < 300ms"
+      where: [mr, drive, live]
+      severity: major
+  reliability:
+    - id: alias-create-reliable
+      says: "Fewer than 0.5% of alias creations fail"
+      measure: "error_rate(route='POST /api/aliases') < 0.5%"
+      where: [mr, drive, live]
+      severity: blocker
+  security:
+    - id: alias-sec-needs-key
+      says: "Creating an alias without the API key is refused"
+      steps: ["anon POST /api/aliases {url: 'https://example.com', alias: 'test'} -> 401"]
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-chars-only
+      says: "Aliases only accept letters, digits and dashes"
+      steps: ["POST /api/aliases {url: 'https://example.com', alias: 'bad alias!'} -> 422"]
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-max-length
+      says: "Aliases are limited to 64 characters"
+      steps: ["POST /api/aliases {url: 'https://example.com', alias: 65 random chars} -> 422"]
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-no-path-traversal
+      says: "Aliases reject path traversal characters"
+      steps: ["POST /api/aliases {url: 'https://example.com', alias: '../evil'} -> 422"]
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-url-http-only
+      says: "Only http and https URLs are accepted"
+      steps: ["POST /api/aliases {url: 'javascript:alert(1)', alias: 'x-{rand}'} -> 422"]
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-url-no-ftp
+      says: "FTP and other non-http schemes are rejected"
+      steps: ["POST /api/aliases {url: 'ftp://example.com', alias: 'x-{rand}'} -> 422"]
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-url-max-length
+      says: "URLs are limited to 2048 characters"
+      steps: ["POST /api/aliases {url: 'https://example.com/{rand-2100}', alias: 'x-{rand}'} -> 422"]
+      where: [mr, drive]
+      severity: blocker
+    - id: alias-no-secrets
+      says: "The alias module never exposes or stores secrets"
+      static: {file_lacks: [app/features/custom_alias.py, "vallum_secrets"]}
+      where: [mr]
+      severity: blocker
+    - id: alias-no-open-redirect
+      says: "Aliases only redirect to stored http(s) addresses"
+      steps:
+        - "POST /api/aliases {url: 'https://example.com/safe', alias: 'x-{rand}'} -> 201 => alias"
+        - "GET /r/x-{rand} -> 302 https://example.com/safe"
+      where: [mr, drive]
+      severity: blocker
