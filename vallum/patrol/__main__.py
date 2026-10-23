@@ -38,6 +38,13 @@ def tier_of_promise(p: cardlib.Promise, cards: dict) -> str:
     return (cards.get(p.feature) or {}).get("tier", "app") if p.feature in cards else "app"
 
 
+def rolled_back_on_purpose(release: dict, serving: str | None) -> bool:
+    """A member rolled production back (command or rollback-now): newer features are not live, so their live
+    promises can't be judged until the next release."""
+    promoted = release.get("promoted_revision")
+    return bool(serving and promoted and serving != promoted)
+
+
 def pause_tier(notes: list[dict], bot: str | None) -> str | None:
     """The tier named in the Flight Director's latest `pause` decision note."""
     tier = None
@@ -88,8 +95,12 @@ class Patrol:
         key = self.api_key()
         cost = float(self.pol.get("allowance", {}).get("behavior_break_cost", 0.05))
         spend, broken = {}, []
+        rolled_back = rolled_back_on_purpose(rel, revision)
+        if rolled_back:
+            log(f"serving {revision}, older than the last release {rel.get('promoted_revision')} (rolled back on "
+                "purpose): live promise checks wait for the next release")
         with core.client_for(self.url, timeout=15) as client:
-            for p in self.cards.promises(where="live"):
+            for p in ([] if rolled_back else self.cards.promises(where="live")):
                 if p.style != "steps":
                     continue
                 out = core.run_step_promise(client, p, key, float(self.pol["judge"]["step_retry_s"]))

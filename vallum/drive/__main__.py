@@ -365,7 +365,7 @@ class Drive:
         rel = self.store.release()
         history = ([old_rev] if old_rev else []) + [r for r in rel.get("previous_good", []) if r != old_rev]
         self.store.set_release(slot="idle", last_good=new_rev, previous_good=history[:5], candidate=None, step=None,
-                               abort=False, released_at=iso(), release_id=rid)
+                               abort=False, released_at=iso(), release_id=rid, promoted_revision=new_rev)
         self.audit(rid, {"by": "drive", "step": 100, "verdict": "promoted"}, finished_at=iso(), outcome="released",
                    revision=new_rev, previous_revision=old_rev, feature=info.get("feature"), owner_notified=bool(mr_iid))
         self.store.event("released", f"{rid} {info.get('feature')} released" + (" (first deploy)" if first else ""),

@@ -485,3 +485,12 @@ def test_fix_label_counts_as_a_fix_for_the_mode_rule():
     files = ["app/features/redirect.py", "promises/features/base-redirect.yaml"]
     assert statuses(rules.evaluate(ctx(files=files, card=None, modes=red_core, is_fix=True, priority="P0")))[11] == "pass"
     assert statuses(rules.evaluate(ctx(files=files, card=None, modes=red_core, is_fix=True, priority="P2")))[11] == "fail"
+
+
+def test_live_checks_wait_while_rolled_back_on_purpose():
+    from vallum.patrol.__main__ import rolled_back_on_purpose
+
+    assert rolled_back_on_purpose({"promoted_revision": "rev-9"}, "rev-7") is True
+    assert rolled_back_on_purpose({"promoted_revision": "rev-9"}, "rev-9") is False
+    assert rolled_back_on_purpose({}, "rev-7") is False                       # before the first Layer 3 release
+    assert rolled_back_on_purpose({"promoted_revision": "rev-9"}, None) is False
