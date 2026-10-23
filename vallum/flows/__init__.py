@@ -228,7 +228,9 @@ class Flows:
         else:
             self.gl.set_assignees(kind, iid, others)
             self.gl.set_assignees(kind, iid, others + [bot])
-        return True
+        # GitLab silently drops users it can't assign: only report success if the bot really is there now
+        after = self.gl.mr(iid) if kind == "merge_requests" else self.gl.issue(iid)
+        return any(u.get("id") == bot for u in after.get(field) or [])
 
     def sessions_on(self, kind: str, iid: int, key: str, since: str) -> list[dict]:
         """Sessions a flow's bot reported on an issue or MR ("started session [id] triggered by @user")."""

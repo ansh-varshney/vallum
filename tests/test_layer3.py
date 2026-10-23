@@ -457,3 +457,31 @@ def test_housekeeping_replaces_older_mrs_even_without_their_label():
     gl = GL()
     mr = housekeeping.open_mr(gl, policy(), "r-0006", [{"action": "update", "file_path": "docs/vallum/CODEMAP.md", "content": "x"}])
     assert mr["iid"] == 8 and gl.closed == ["/projects/:id/merge_requests/6"]
+
+
+def test_trigger_start_fails_over_when_gitlab_drops_the_bot():
+    from vallum.flows import Flows
+
+    class GL:
+        project_id = "1"
+
+        def __init__(self, keeps):
+            self.keeps, self.assignees = keeps, []
+
+        def issue(self, iid):
+            return {"assignees": [{"id": a} for a in self.assignees]}
+
+        def set_assignees(self, kind, iid, ids):
+            self.assignees = ids if self.keeps else []
+
+    store = Store(MemoryState())
+    store.b.put("vallum_flows", "release", {"service_account_id": 42})
+    assert Flows(GL(keeps=True), store).start_by_trigger("release", "issues", 4, as_reviewer=False) is True
+    assert Flows(GL(keeps=False), store).start_by_trigger("release", "issues", 4, as_reviewer=False) is False
+
+
+def test_fix_label_counts_as_a_fix_for_the_mode_rule():
+    red_core = {"core": {"mode": "red"}}
+    files = ["app/features/redirect.py", "promises/features/base-redirect.yaml"]
+    assert statuses(rules.evaluate(ctx(files=files, card=None, modes=red_core, is_fix=True, priority="P0")))[11] == "pass"
+    assert statuses(rules.evaluate(ctx(files=files, card=None, modes=red_core, is_fix=True, priority="P2")))[11] == "fail"

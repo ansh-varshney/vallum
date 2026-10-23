@@ -142,7 +142,7 @@ def build(gl, mr: dict, mode: str, local_root: Path | None = None) -> GateContex
     subjects = [c for n, c in branch_cards.cards.items() if branch_cards.paths.get(n) in files]
     if not priority:
         priority = min((c.get("priority", "P2") for c in subjects), default="P2")
-    is_fix = any(c.get("kind") in ("bug-fix", "security-fix") for c in subjects)
+    is_fix = any(c.get("kind") in ("bug-fix", "security-fix") for c in subjects) or pol.label("fix") in labels
 
     return GateContext(
         mode=mode, policy=pol, catalog=cat, author=mr["author"], changed_files=files,

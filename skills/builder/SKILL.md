@@ -44,7 +44,8 @@ Paste the guardians' promises unchanged (fix only obvious syntax: literal values
 - One `create_commit` with `branch: vallum/<issue>-<feature>`, `start_branch: main`, actions `create` for the
   three files, commit message `<Feature title> (#<issue>)`.
 - `create_merge_request`: source `vallum/<issue>-<feature>`, target `main`, title `<Feature title>`,
-  `labels: "vallum,priority::<P>"`, `remove_source_branch: true`, description:
+  `labels: "vallum,priority::<P>"` (add `,vallum-fix` when the request issue carries `vallum-fix`),
+  `remove_source_branch: true`, description:
 ```
 Related to #<issue>
 
