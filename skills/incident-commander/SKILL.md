@@ -38,7 +38,7 @@ A broken **watch** promise becomes permanent: copy it with `learned_from`. Commi
 
 ## 3. Fix issue (Door C: code starts the Ship flow on it by itself)
 `create_issue` titled `Fix: <cause in a few words>` with the cause, the diff lines, and a "How will we know it
-works?" section with one line per done-when; labels `vallum,vallum::fix,priority::P0` if the tier is Core,
-else `vallum,vallum::fix,priority::P1`.
+works?" section with one line per done-when; labels `vallum,vallum-fix,priority::P0` if the tier is Core,
+else `vallum,vallum-fix,priority::P1`.
 
 Answer with JSON `{"postmortem": true, "learned_mr": <iid>, "fix_issue": <iid>}`.

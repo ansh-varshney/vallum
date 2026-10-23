@@ -363,6 +363,7 @@ def test_housekeeping_changes_only_when_needed(tmp_path):
     actions = housekeeping.changes(ROOT, ["promises/features/9-demo.yaml"], files.get)
     assert [a["file_path"] for a in actions] == ["promises/features/9-demo.yaml"]
     shifted = re.sub(r" :(\d+)", lambda m: f" :{int(m.group(1)) + 3}", text)   # only line numbers moved
+    shifted = re.sub(r", (\d+) lines\)", lambda m: f", {int(m.group(1)) + 1} lines)", shifted)
     assert housekeeping.changes(ROOT, [], {"docs/vallum/CODEMAP.md": shifted}.get) == []
     assert housekeeping.changes(ROOT, [], {}.get)[0]["action"] == "create"
 
@@ -422,3 +423,37 @@ def test_release_clears_stale_hold_labels():
     drive.clear_labels(5, 4)
     assert "vallum::needs-human" in drive.gl.mr_calls[0][2] and "vallum::paused" in drive.gl.mr_calls[0][2]
     assert "vallum::needs-human" in drive.gl.issue_calls[0][1]["remove_labels"]
+
+
+def test_labels_that_describe_a_change_are_not_scoped():
+    """Regression: GitLab keeps one `vallum::` label per item, so adding vallum::ready dropped
+    vallum::housekeeping from MR !6 and the Gatekeeper no longer waived rule 9."""
+    pol = policy()
+    for kind in ("fix", "housekeeping", "override"):
+        assert "::" not in pol.label(kind), kind
+    states = [pol.label(k) for k in ("ready", "blocked", "needs_human", "paused")]
+    assert all(s.startswith("vallum::") for s in states)          # one state at a time is intended
+
+
+def test_housekeeping_replaces_older_mrs_even_without_their_label():
+    class GL:
+        def __init__(self):
+            self.closed, self.posted = [], []
+
+        def open_mrs(self, label):
+            return [{"iid": 6, "source_branch": "vallum/housekeeping-r-0005", "labels": ["vallum", "vallum::blocked"]},
+                    {"iid": 7, "source_branch": "feature", "labels": ["vallum"]}]
+
+        def put(self, path, json=None):
+            self.closed.append(path)
+
+        def add_note(self, kind, iid, body):
+            pass
+
+        def post(self, path, json=None):
+            self.posted.append(path)
+            return {"iid": 8}
+
+    gl = GL()
+    mr = housekeeping.open_mr(gl, policy(), "r-0006", [{"action": "update", "file_path": "docs/vallum/CODEMAP.md", "content": "x"}])
+    assert mr["iid"] == 8 and gl.closed == ["/projects/:id/merge_requests/6"]

@@ -1,6 +1,6 @@
 """Post-release housekeeping (B29): after a release, code opens one docs-only merge request that refreshes the
 code map and drops the watch promises that expired with the release. It carries the label
-`vallum::housekeeping`; the Gatekeeper waives agent review for it only if it really is just that
+`vallum-housekeeping`; the Gatekeeper waives agent review for it only if it really is just that
 (no agent commits, only the code map and cards that differ from main in their `watch` list)."""
 
 import re
@@ -58,15 +58,17 @@ def changes(root: Path, card_paths: list[str], main_file) -> list[dict]:
 
 
 def _without_line_numbers(text: str) -> str:
-    """Line numbers move with every edit; only open an MR when the map really changed."""
-    return re.sub(r":\d+(-\d+)?\b", "", text)
+    """Line numbers and line counts move with every edit; only open an MR when the map really changed."""
+    return re.sub(r", \d+ lines\)", ")", re.sub(r":\d+(-\d+)?\b", "", text))
 
 
 def open_mr(gl, pol, release_id: str, actions: list[dict]) -> dict | None:
     if not actions:
         return None
     label = pol.label("housekeeping")
-    for old in gl.open_mrs(label) or []:
+    older = [m for m in gl.open_mrs(pol.label("opt_in")) or []
+             if str(m.get("source_branch", "")).startswith("vallum/housekeeping-") or label in m.get("labels", [])]
+    for old in older:
         gl.put(f"/projects/:id/merge_requests/{old['iid']}", json={"state_event": "close"})
         gl.add_note("merge_requests", old["iid"], f"🛡 Vallum: replaced by the housekeeping after {release_id}.")
     branch = f"vallum/housekeeping-{release_id}"

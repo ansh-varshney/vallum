@@ -13,9 +13,9 @@ labels:
   ledger: "vallum::ledger"
   incident: "vallum::incident"
   paused: "vallum::paused"
-  fix: "vallum::fix"
-  housekeeping: "vallum::housekeeping"
-  override: "vallum::override"
+  fix: "vallum-fix"                # not scoped: GitLab keeps one vallum:: label per item, and these describe the change, not its state
+  housekeeping: "vallum-housekeeping"
+  override: "vallum-override"
 
 demo: true                       # demo watch times, sample sizes and 60-minute windows
 
