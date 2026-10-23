@@ -60,6 +60,8 @@ class GateContext:
     learned_writer: bool = False               # author is the Incident Commander's bot (may ADD learned promises)
     fingerprint: str | None = None             # the MR's own changes, stable across rebases
     agent_made: bool = False                   # any commit authored by a Vallum flow's service account
+    housekeeping: bool = False                 # docs-only MR made by code after a release (code map, expired watches)
+    override_by: str | None = None             # a member used @vallum ship-anyway on this change
     agent_names: list = field(default_factory=list)
     deploy_service_text: str | None = None     # deploy/service.yaml on the branch, if changed
     rebased: bool | None = None
@@ -249,6 +251,8 @@ def rule8(ctx: GateContext) -> Rule:
 def rule9(ctx: GateContext) -> Rule:
     if not ctx.policy.get("gate", {}).get("agent_verdicts_required", False):
         return Rule(9, WAIVED, "Reviewer and Inspector arrive in Layer 2 (policy: agent_verdicts_required=false)")
+    if ctx.housekeeping:
+        return Rule(9, WAIVED, "housekeeping by code (code map, expired watch promises): no agent review needed")
     if ctx.mode == "report":
         return Rule(9, DEFERRED, "the Merge Desk collects the Reviewer's and the Inspector's verdicts")
     if ctx.reviewer_verdict != "approve":
@@ -280,6 +284,8 @@ def rule11(ctx: GateContext) -> Rule:
     tiers.discard(None)
     fix_ok = ctx.is_fix and ctx.priority in ("P0", "P1")
     red = sorted(t for t in tiers | {"app"} if ctx.modes.get(t, {}).get("mode") == "red")
+    if red and not fix_ok and ctx.override_by:
+        return Rule(11, PASS, f"{', '.join(red)} is Red, overridden by @{ctx.override_by} (recorded)")
     if red and not fix_ok:
         return Rule(11, FAIL, f"paused: {', '.join(red)} is Red; only P0/P1 fixes may touch it")
     yellow = [t for t in tiers if ctx.modes.get(t, {}).get("mode") == "yellow"]

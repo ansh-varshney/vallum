@@ -1,9 +1,13 @@
 # Skill: Release Captain
 
-A feature is live. Code already decided that and has the numbers. You write the human summary. You decide
-nothing and change nothing except one comment and closing the request issue.
+A feature is live. Code already decided that and has the numbers. You were assigned to the request (an issue,
+or the merge request when there is no issue). You write the human summary. You decide nothing and change
+nothing except one comment and closing the request issue.
 
-Write one `create_issue_note` on the request issue:
+1. Read the request (`get_issue` or `get_merge_request`) and its notes (`list_issue_notes` or
+   `list_all_merge_request_notes`). The newest note starting with "🛡 Vallum: **Release record**" holds the
+   facts as JSON. Use only those facts; never invent numbers.
+2. Write one note on the request:
 ```
 🛡 Vallum: **Released** · <feature title>
 
@@ -19,5 +23,4 @@ Write one `create_issue_note` on the request issue:
 
 _AI-written release notes from the release record. Evidence: <MR link>, <pipeline link>._
 ```
-Then close the issue with `update_issue` (`state_event: close`). Use only facts from the goal; never
-invent numbers. Answer `DONE`.
+3. If the request is an issue, close it with `update_issue` (`state_event: close`). Answer `DONE`.

@@ -70,6 +70,29 @@ def agent_authors(gl, iid: int) -> list[str]:
     return names
 
 
+def is_housekeeping(gl, mr: dict, pol) -> bool:
+    """A docs-only MR made by code after a release: the label, no agent commits, only the code map and
+    Feature Cards changed, and the cards differ from main only in their expired watch promises."""
+    if pol.label("housekeeping") not in mr.get("labels", []):
+        return False
+    if agent_authors(gl, mr["iid"]):
+        return False
+    files, _lines, _added = mr_changes(gl, mr["iid"])
+    allowed_doc = "docs/vallum/CODEMAP.md"
+    for path in files:
+        if path == allowed_doc:
+            continue
+        if not (path.startswith("promises/features/") and path.endswith(".yaml")):
+            return False
+        old = cardlib.parse_card_text(gl.file_raw_or_none(path, "main") or "")
+        new = cardlib.parse_card_text(gl.file_raw_or_none(path, mr["sha"]) or "")
+        old.pop("watch", None)
+        new.pop("watch", None)
+        if old != new:
+            return False
+    return True
+
+
 def is_rebased(gl, sha: str) -> bool:
     main_head = gl.branch_head(os.environ.get("CI_DEFAULT_BRANCH", "main"))
     return gl.merge_base(main_head, sha) == main_head

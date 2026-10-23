@@ -48,3 +48,11 @@ promises:
       steps: ["POST /api/links {url: 'javascript:alert(1)'} -> 422"]
       where: [mr, drive]
       severity: blocker
+    - id: link-url-well-formed
+      says: "Addresses with spaces or without a host are refused"
+      steps:
+        - "POST /api/links {url: 'https://example.com/a b'} -> 422"
+        - "POST /api/links {url: 'http://'} -> 422"
+        - "POST /api/links {url: 'https:///path'} -> 422"
+      where: [mr, drive]
+      severity: blocker

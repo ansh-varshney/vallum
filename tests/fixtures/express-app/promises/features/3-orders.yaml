@@ -1,0 +1,16 @@
+feature: orders
+issue: 3
+kind: new-endpoint
+tier: core
+priority: P1
+owns:
+  routes: ["POST /api/orders", "GET /api/orders/:id"]
+  files: [src/routes/orders.js, test/orders.test.js]
+flag: orders
+promises:
+  behavior:
+    - id: order-create-read
+      says: "A new order can be read back"
+      steps: ["POST /api/orders {item: 'bread', quantity: 2} -> 201 => o", "GET /api/orders/{o.id} -> 200 contains bread"]
+      where: [mr, drive, live]
+      severity: blocker

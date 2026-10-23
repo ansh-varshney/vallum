@@ -1,0 +1,19 @@
+# Profile of a different codebase, used to prove Vallum's code map is not tied to one project (D6 T3.8b).
+name: orders-api
+description: "A small orders API for a bakery, written in JavaScript with Express."
+language: javascript
+framework: express
+source_dirs: [src]
+test_dirs: [test]
+feature:
+  dir: src/routes
+  module: "src/routes/{module}.js"
+  test: "test/{module}.test.js"
+  card: "promises/features/{issue}-{feature}.yaml"
+entry_points: [src/app.js]
+never_edit: [src/app.js, src/db.js]
+commands:
+  test: "npm test"
+  start: "node src/app.js"
+  health: /healthcheck
+ignore: [node_modules]

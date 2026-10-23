@@ -205,6 +205,7 @@ live-patrol:
   extends: [.python, .gcp]
   rules: [*if_ops]
   needs: []
+  timeout: 20m                   # live checks, 30 s of visitors, resuming paused work, @vallum commands
   script:
     - python -m vallum.patrol
 

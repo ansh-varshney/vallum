@@ -29,7 +29,9 @@ def test_write_needs_the_key(client):
 
 
 def test_only_http_urls(client):
-    for bad in ["javascript:alert(1)", "ftp://x", "https://a b", "x" * 10]:
+    tab, newline, nul = chr(9), chr(10), chr(0)
+    for bad in ["javascript:alert(1)", "ftp://x", "https://a b", "x" * 10, "https://e.com/a" + tab + "b",
+                "https://e.com/a" + newline + "b", "http://", "https:///path", "http://:80/", "https://e.com/" + nul]:
         assert client.post("/api/links", json={"url": bad}, headers=KEY).status_code == 422
 
 

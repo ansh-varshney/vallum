@@ -84,14 +84,14 @@ def test_review_instructions_match_the_rulebook():
 @pytest.mark.parametrize("key", list(FLOWS))
 def test_flow_yaml_is_well_formed(key):
     """A local lint for Flow Registry v1, so mistakes are caught before publishing."""
-    text = (FLOWS_DIR / FLOWS[key][0]).read_text(encoding="utf-8")
+    text = (FLOWS_DIR / FLOWS[key]["file"]).read_text(encoding="utf-8")
     spec = yaml.safe_load(text)
     assert spec["version"] == "v1" and spec["environment"] == "ambient"
     # what gitlab.com's validator refuses today (learned from the first publish)
     assert not {"name", "description"} & set(spec), "top-level name/description are not allowed"
     assert "max_cycles" not in text, "max_cycles is not allowed yet"
     assert "<!--" not in text and "<system>" not in text and "<goal>" not in text, "prompts may not contain these"
-    assert FLOWS[key][2].startswith("Vallum")
+    assert FLOWS[key]["name"].startswith("Vallum")
     comps = {c["name"]: c for c in spec["components"]}
     prompts = {p["prompt_id"] for p in spec.get("prompts", [])}
     schemas = {s["schema_id"] for s in spec.get("response_schemas", [])}

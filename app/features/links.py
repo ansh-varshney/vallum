@@ -1,5 +1,6 @@
 """Create, read and delete short links. Card: promises/features/base-links.yaml"""
 
+import re
 import secrets
 import string
 
@@ -22,10 +23,22 @@ class NewLink(BaseModel):
     @field_validator("url")
     @classmethod
     def http_only(cls, value: str) -> str:
-        value = value.strip()
-        if not value.lower().startswith(("http://", "https://")) or len(value) > 2048 or " " in value:
-            raise ValueError("url must be an http(s) address under 2048 characters")
-        return value
+        return valid_url(value)
+
+
+def valid_url(value: str) -> str:
+    """http(s) only, at most 2048 characters, a real host, no whitespace or control characters."""
+    value = value.strip()
+    if not value.lower().startswith(("http://", "https://")) or len(value) > 2048:
+        raise ValueError("url must be an http(s) address under 2048 characters")
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError("url must not contain whitespace or control characters")
+    rest = value.split("://", 1)[1]
+    host = re.split(r"[/?#]", rest, maxsplit=1)[0].rsplit("@", 1)[-1]
+    host = host.split("]", 1)[0].lstrip("[") if host.startswith("[") else host.split(":", 1)[0]
+    if not host:
+        raise ValueError("url must have a host after the scheme")
+    return value
 
 
 def _public(link: dict, request: Request) -> dict:

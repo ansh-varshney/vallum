@@ -17,7 +17,7 @@ from pathlib import Path
 
 from simulate.visitors import Visitors, ensure_links, plan_rates
 from vallum import cards as cardlib
-from vallum import config, evidence, gcp
+from vallum import agents, allowance, config, evidence, gcp, housekeeping
 from vallum.checker import core
 from vallum.checker.measure import parse_measure
 from vallum.config import iso, utcnow
@@ -103,14 +103,53 @@ class Drive:
         except Exception:
             return None
 
-    def start_agent(self, key: str, goal: dict, issue_id=None):
-        """Agents think after code acts: a failure here never changes the release outcome."""
+    def start_agent(self, key: str, kind: str, iid: int, goal: dict, issue_id=None) -> str | None:
+        """Agents think after code acts: a failure here never changes the release outcome. Started by assigning
+        the flow's bot (member-only action, namespace credits); the Flows API is the fallback."""
         try:
-            started = Flows(self.gl, self.store).start(key, goal, issue_id=issue_id)
-            self.store.event("agent", f"{goal.get('release_id')}: started {key} session {started.get('id')}")
-            log(f"started {key} flow: session {started.get('id')}")
+            via = agents.start(Flows(self.gl, self.store), self.store, self.pol, self.notify, key, kind, int(iid), goal,
+                               as_reviewer=False, issue_id=issue_id)
         except Exception as exc:
             log(f"could not start the {key} flow: {exc}")
+            return None
+        if via:
+            self.store.event("agent", f"{goal.get('release_id')}: started {key} ({via})")
+            log(f"started {key} flow ({via}) on {kind}/{iid}")
+        return via
+
+    def spend(self, samples: list[dict], label: str):
+        """Every simulated visit during a traffic step is a visit: bad ones spend the mistake allowance."""
+        tier_of, limits = allowance.route_profile(self.cards.cards)
+        counts = allowance.count(samples, tier_of, limits, float(self.pol.get("allowance", {}).get("slow_factor", 2.0)),
+                                 warmup_s=float(self.pol["judge"]["warmup_s"]))
+        allowance.record(self.store, counts, label, None, self.pol.window_minutes())
+        return counts
+
+    def clear_labels(self, mr_iid, issue_iid):
+        """A released change carries no stale hold labels (needs-human, paused, blocked)."""
+        stale = [self.pol.label(k) for k in ("needs_human", "paused", "blocked", "ready")]
+        try:
+            if mr_iid:
+                self.gl.mr_labels(int(mr_iid), remove=stale)
+            if issue_iid:
+                self.gl.edit_issue(int(issue_iid), remove_labels=",".join(stale))
+        except Exception as exc:
+            log(f"could not clear old labels: {exc}")
+
+    def housekeeping(self, info: dict):
+        """Refresh the code map and drop the watch promises that expired with this release (one docs-only MR)."""
+        names = set(info.get("features") or []) | set(info.get("touched") or [])
+        paths = [self.cards.paths[n] for n in names if n in self.cards.paths]
+        try:
+            actions = housekeeping.changes(config.ROOT, paths, lambda p: self.gl.file_raw_or_none(p, "main"))
+            mr = housekeeping.open_mr(self.gl, self.pol, info["release_id"], actions)
+            if mr:
+                self.store.event("housekeeping", f"{info['release_id']}: opened !{mr['iid']} ({len(actions)} file(s))")
+                log(f"housekeeping MR !{mr['iid']}: " + ", ".join(a["file_path"] for a in actions))
+            else:
+                log("housekeeping: code map current, no expired watch promises")
+        except Exception as exc:
+            log(f"housekeeping failed (release unaffected): {exc}")
 
     def gitlab_release(self, info: dict, new_rev: str, kept: list[str]):
         rid = info["release_id"]
@@ -172,7 +211,8 @@ class Drive:
         info = self.identify()
         rid, mr_iid, tier = info["release_id"], info.get("mr_iid"), info["tier"]
         names = sorted(set(info.get("features") or []) | set(info.get("touched") or []))
-        steps = self.pol.steps(tier)
+        mode = ((self.store.doc("modes").get(tier) or {}).get("mode")) or "green"
+        steps = self.pol.steps(tier, mode)
         watch = self.pol.watch_seconds(tier)
         total = len(steps) * 2 * watch + 600
         deadline = utcnow() + timedelta(seconds=total + 60 * float(self.pol["watchdog"]["deadlines_min"]["driving_extra"]))
@@ -185,8 +225,8 @@ class Drive:
         except Abort as exc:
             log(f"release slot busy: {exc}")
             return 1
-        self.report.update(release=rid, mr=mr_iid, tier=tier, features=names, image=image, steps_planned=steps)
-        log(f"{rid}: tier {tier}, steps {steps}, watch {watch:.0f}s, features {names or 'all'}")
+        self.report.update(release=rid, mr=mr_iid, tier=tier, mode=mode, features=names, image=image, steps_planned=steps)
+        log(f"{rid}: tier {tier} ({mode.upper()}), steps {steps}, watch {watch:.0f}s, features {names or 'all'}")
         if info.get("owner_push"):
             self.audit(rid, {"by": "provenance", "result": "owner push (build phase override)"},
                        title=info.get("title"), feature=info.get("feature"), tier=tier, requester=info.get("author"),
@@ -228,8 +268,16 @@ class Drive:
         needs = self.needs(metric)
         max_rps = float(self.pol["simulate"]["max_rps"])
         seconds = max(12.0, sum(n * 1.3 for r, n in needs.items() if r != "*") / (max_rps * 0.8))
-        rates = plan_rates(needs, 1.0, seconds, 0, max_rps, {}) or {"GET /health": 20}
-        v = Visitors(cand_url, fresh, key)
+        replay = [p.id for p in promises if p.data.get("replay")]
+        if replay:
+            # a learned promise asks step 0 to replay real traffic (real links, real popularity), not only test links
+            sim = self.pol["simulate"]
+            rates = plan_rates(needs, 1.0, seconds, float(sim["base_rps"]), max_rps, sim["mix"])
+            v = Visitors(cand_url, self.sim_codes(key) + fresh, key)
+            log(f"step 0 replays real traffic for {', '.join(replay)}")
+        else:
+            rates = plan_rates(needs, 1.0, seconds, 0, max_rps, {}) or {"GET /health": 20}
+            v = Visitors(cand_url, fresh, key)
         asyncio.run(v.run(rates, seconds))
         warm = [s for s in v.samples if s.get("t", 0) >= 2.0]   # skip connection set-up in the first seconds
         for p in metric:
@@ -238,7 +286,7 @@ class Drive:
             rows.append({"id": p.id, "feature": p.feature, "type": p.type, "severity": p.severity, **got})
         bad = [r for r in rows if r["verdict"] in ("broken", "collecting") and judge.blocks(r["severity"], tier)]
         self.report["steps"].append({"step": 0, "url": cand_url, "visits": len(v.samples), "rows": rows,
-                                     "verdict": "broken" if bad else "kept"})
+                                     "replay": replay, "verdict": "broken" if bad else "kept"})
         self.save_report(rid)
         if bad:
             worst = bad[0]
@@ -269,8 +317,10 @@ class Drive:
             for s in samples:
                 per_rev.setdefault(s.get("revision") or "none", 0)
                 per_rev[s.get("revision") or "none"] += 1
+            counts = self.spend(samples, f"drive {rid} {pct}%")
             self.report["steps"].append({"step": pct, "verdict": verdict, "elapsed_s": round(elapsed, 1), "rates": rates,
-                                         "visits": len(samples), "by_revision": per_rev, "rows": rows})
+                                         "visits": len(samples), "by_revision": per_rev, "rows": rows,
+                                         "allowance_counts": counts})
             self.save_report(rid)
             self.audit(rid, {"by": "drive", "step": pct, "verdict": verdict, "visits": len(samples)})
             if verdict != judge.KEPT:
@@ -317,7 +367,7 @@ class Drive:
         self.store.set_release(slot="idle", last_good=new_rev, previous_good=history[:5], candidate=None, step=None,
                                abort=False, released_at=iso(), release_id=rid)
         self.audit(rid, {"by": "drive", "step": 100, "verdict": "promoted"}, finished_at=iso(), outcome="released",
-                   revision=new_rev, owner_notified=bool(mr_iid))
+                   revision=new_rev, previous_revision=old_rev, feature=info.get("feature"), owner_notified=bool(mr_iid))
         self.store.event("released", f"{rid} {info.get('feature')} released" + (" (first deploy)" if first else ""),
                          release_id=rid)
         kept = sorted({f"{r.get('feature')}/{r.get('id')}" for st in self.report["steps"] for r in st.get("rows", [])
@@ -333,13 +383,23 @@ class Drive:
                     started = None
             minutes = round((utcnow() - config.parse_iso(started)).total_seconds() / 60, 1) if started else None
             server = os.environ.get("CI_SERVER_URL", "https://gitlab.com")
-            self.start_agent("release", {
+            record = {
                 "release_id": rid, "title": info.get("title"), "feature": info.get("feature"), "tier": info.get("tier"),
-                "revision": new_rev, "merge_request_iid": mr_iid, "issue_iid": issue_iid,
+                "mode": self.report.get("mode"), "revision": new_rev, "previous_revision": old_rev,
+                "merge_request_iid": mr_iid, "issue_iid": issue_iid,
                 "merge_request_url": f"{server}/{os.environ.get('CI_PROJECT_PATH', '')}/-/merge_requests/{mr_iid}",
                 "pipeline_url": os.environ.get("CI_PIPELINE_URL"), "promises_kept": kept,
                 "test_drive": ["step 0"] + [f"{s['step']}%" for s in self.report["steps"] if s["step"]] + ["100%"],
-                "issue_to_live_minutes": minutes, "human_actions": 0}, issue_id=issue_iid)
+                "issue_to_live_minutes": minutes,
+                "human_actions": int((self.store.load_release(rid) or {}).get("human_actions", 0))}
+            kind, target = ("issues", issue_iid) if issue_iid else (MR, mr_iid)
+            try:
+                self.gl.add_note(kind, int(target), "🛡 Vallum: **Release record** (written by code; the Release Captain "
+                                 "summarises it)\n\n```json\n" + json.dumps(record, indent=1, default=str) + "\n```")
+            except Exception as exc:
+                log(f"could not post the release record: {exc}")
+            self.start_agent("release", kind, target, record, issue_id=issue_iid)
+        self.clear_labels(mr_iid, issue_iid)
         self.status(mr_iid, "Released 100%", "done", note=new_rev,
                     now=f"Live for everyone. [Open the app]({self.url}/status).", action="nothing.")
         if mr_iid:
@@ -348,6 +408,8 @@ class Drive:
                               impact="None: every promise was kept at every step.",
                               done="Step 0 and each traffic step passed; Vallum promoted the new revision.",
                               nxt="The Live Patrol keeps checking its promises in production.", action="No.")
+        if not info.get("housekeeping"):
+            self.housekeeping(info)
         self.notify.ledger()
         log(f"{rid} released: {new_rev}")
         return 0
@@ -391,11 +453,16 @@ class Drive:
         incident = None
         if verdict != "aborted":
             try:
+                broken = [r for r in rows if r.get("verdict") in (judge.BROKEN, judge.AT_RISK)][:5]
+                record = {"release_id": rid, "step_percent": pct, "verdict": verdict, "broken_promises": broken,
+                          "merge_request_iid": mr_iid, "issue_iid": self.issue_of(mr_iid), "bad_revision": new_rev,
+                          "good_revision": old_rev, "rollback_seconds": round(took, 1), "tier": info.get("tier"),
+                          "feature": info.get("feature"), "title": info.get("title")}
                 body = (f"🛡 Vallum: release `{rid}` was rolled back at the {pct}% step.\n\n"
                         f"**Broken promise:** {reason}\n\n**Revision:** `{new_rev}` → back to `{old_rev}` in {took:.1f} s\n\n"
                         f"**Change:** {('!' + str(mr_iid)) if mr_iid else info.get('commit', '')[:8]} {info.get('title')}\n\n"
-                        "```json\n" + json.dumps(rows, indent=1, default=str)[:3000] + "\n```\n\n"
-                        "_Layer 2: the Incident Commander adds the postmortem and a learned promise here._")
+                        "**Incident record** (written by code; the Incident Commander reads it)\n"
+                        "```json\n" + json.dumps(record, indent=1, default=str)[:6000] + "\n```")
                 incident = self.gl.create_issue(f"Incident: {rid} rolled back ({w.get('id', verdict)} at {pct}%)", body,
                                                 [self.pol.label("incident")])
             except Exception as exc:
@@ -403,13 +470,8 @@ class Drive:
         self.store.event("rolled_back", f"{rid} rolled back at {pct}%: {reason[:120]}", release_id=rid,
                          incident=incident and incident["iid"])
         if incident:
-            broken = [r for r in rows if r.get("verdict") in (judge.BROKEN, judge.AT_RISK)][:5]
-            self.start_agent("incident", {
-                "release_id": rid, "incident_iid": incident["iid"], "step_percent": pct, "verdict": verdict,
-                "broken_promises": broken, "merge_request_iid": mr_iid, "issue_iid": self.issue_of(mr_iid),
-                "bad_revision": new_rev, "good_revision": old_rev, "rollback_seconds": round(took, 1),
-                "tier": info.get("tier"), "feature": info.get("feature"), "title": info.get("title")},
-                issue_id=incident["iid"])
+            self.start_agent("incident", "issues", incident["iid"], {"incident_iid": incident["iid"], **record},
+                             issue_id=incident["iid"])
         self.status(mr_iid, f"{pct}%", "failed", note=w.get("id", verdict))
         self.status(mr_iid, "Rolled back", "rolled_back", note=f"{took:.0f} s",
                     now=f"Rolled back: {reason}." + (f" Incident #{incident['iid']} is open." if incident else ""),

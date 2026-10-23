@@ -59,7 +59,8 @@ def render_alert(event: str, author: str | None, what: str, impact: str, done: s
     ])
 
 
-def render_ledger(release: dict, meta: dict, modes: dict, queue: list, recent: list) -> str:
+def render_ledger(release: dict, meta: dict, modes: dict, queue: list, recent: list, usage: dict | None = None,
+                  cap: int | None = None) -> str:
     rows = []
     for tier in ("core", "standard", "experimental", "app"):
         m = modes.get(tier, {})
@@ -70,6 +71,9 @@ def render_ledger(release: dict, meta: dict, modes: dict, queue: list, recent: l
     q = "\n".join(f"{i}. {item}" for i, item in enumerate(queue, 1)) or "_empty_"
     rec = "\n".join(f"- {e.get('at', '')[:16].replace('T', ' ')} · **{e.get('kind')}** · {e.get('summary')}" for e in recent[:12]) or "_nothing yet_"
     safe = f"**ON**: {meta.get('safe_mode_reason', '')}" if meta.get("safe_mode") else "off"
+    day = utcnow().strftime("%Y-%m-%d")
+    by_key = ", ".join(f"{k.split(':', 1)[1]} {v}" for k, v in sorted((usage or {}).items()) if k.startswith(day + ":"))
+    agents_line = f"{int((usage or {}).get(day, 0))}" + (f" of {cap}" if cap else "") + (f" ({by_key})" if by_key else "")
     return f"""{PREFIX} **Reliability Ledger** (a mirror of the state store; rewritten by code, never edited by hand)
 
 _Updated {iso()[:16].replace('T', ' ')} UTC_
@@ -79,6 +83,8 @@ _Updated {iso()[:16].replace('T', ' ')} UTC_
 {chr(10).join(rows)}
 
 **Release:** {current} · **Safe mode:** {safe} · **Circuit breaker:** {breaker} rollback(s) in the window
+
+**Agent sessions started by code today:** {agents_line} (the credit guard turns Safe mode on at the cap)
 
 ### Queue
 {q}
@@ -175,7 +181,9 @@ class Notifier:
             if not iid:
                 return
             body = render_ledger(self.store.release(), self.store.doc("meta"), self.store.doc("modes"),
-                                 self.store.doc("queue").get("items", []), self.store.doc("recent").get("events", []))
+                                 self.store.doc("queue").get("items", []), self.store.doc("recent").get("events", []),
+                                 self.store.doc("usage"),
+                                 int(self.policy.get("credits", {}).get("daily_code_started_sessions", 0)) or None)
             self.gl.edit_issue(iid, description=body)
         except Exception:
             print(f"[notify] Ledger update failed:\n{traceback.format_exc()}")

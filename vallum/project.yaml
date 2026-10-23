@@ -1,0 +1,32 @@
+# This repository's profile (B29). Protected path: only the owner changes it.
+# Vallum's code and agents read it to learn how THIS codebase is laid out; nothing project-specific
+# is hard-coded in Vallum itself. Another project writes its own profile and guidelines.
+name: vallum-link-shortener
+description: "A link shortener for small businesses: create short links, redirect visitors, see link details."
+language: python
+framework: fastapi
+
+source_dirs: [app]
+test_dirs: [tests]
+feature:
+  dir: app/features                    # one module per feature, discovered automatically
+  module: "app/features/{module}.py"
+  test: "tests/test_{module}.py"
+  card: "promises/features/{issue}-{feature}.yaml"
+routes:
+  style: decorator                     # routes are declared with decorators like @router.get("/path")
+  patterns: ['@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"']
+entry_points: [app/main.py]
+never_edit: [app/main.py, app/store.py, app/security.py]   # shared code; a feature never changes it
+
+commands:
+  test: "pytest"
+  start: "{python} -m uvicorn app.main:app --host 127.0.0.1 --port {port} --no-access-log"
+  health: /health
+
+docs:
+  guidelines: docs/vallum/GUIDELINES.md
+  codemap: docs/vallum/CODEMAP.md
+  roles: docs/vallum/roles
+
+ignore: [".cache", "reports", "tests/fixtures", "**/__pycache__", ".gitlab", "prd-source"]

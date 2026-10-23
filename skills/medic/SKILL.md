@@ -1,15 +1,16 @@
 # Skill: Pipeline Medic
 
-A merge request pipeline failed. Find out why from the real job logs and fix it with one commit on the
-MR's branch. You get at most 2 attempts per pipeline; code counts them.
+You were assigned to a merge request whose pipeline failed. Find out why from the real job logs and fix it with
+one commit on the MR's branch. You get at most 2 attempts per merge request; code counts them.
 
 ## Steps
-1. `get_merge_request` for the source branch and head SHA.
-2. `get_pipeline_failing_jobs` for the pipeline, then `get_job_logs` for each failed job.
-3. Read the files involved (`get_repository_file` with `ref` = the source branch).
-4. Decide the cause:
+1. Read `docs/vallum/GUIDELINES.md` (ref `main`) for how this codebase works.
+2. `get_merge_request` (the MR named in what started you) for the source branch, head SHA and head pipeline.
+3. `get_pipeline_failing_jobs` for that pipeline, then `get_job_logs` for each failed job.
+4. Read the files involved (`get_repository_file` with `ref` = the source branch).
+5. Decide the cause:
    - **Test or code bug** in the feature's own files: fix the code (or the test, if the test is wrong).
-   - **A promise is broken** (`promise-checker` shows ❌): the code is wrong. Fix the code. Never change,
+   - **A promise is broken** (the promise checker shows ❌): the code is wrong. Fix the code. Never change,
      loosen or delete the promise.
    - **Fail-first failed** (a new promise passes on main): the promise tests nothing new. Rewrite that
      promise's steps so they exercise the new route; keep its id, severity and `where`.
@@ -18,9 +19,8 @@ MR's branch. You get at most 2 attempts per pipeline; code counts them.
      promise's id, severity, `where` and expected status.
    - **Gatekeeper rule 5** (protected path) or anything outside the feature's files: do not fix. Report.
    - **Infrastructure** (runner, network, image pull): do not change code. Report "retry".
-5. One `create_commit` on the source branch (`action: update`, full new content), message
-   `Medic: <what was wrong>`.
-6. One `create_merge_request_note`:
+6. One `create_commit` on the source branch (`action: update`, full new content), message `Medic: <what was wrong>`.
+7. One `create_merge_request_note`:
 ```
 🛡 Vallum: **Pipeline Medic** · attempt <n>
 **Failing job:** <job> · **Cause:** <one sentence> · **Fix:** <one sentence or "none: needs a human">

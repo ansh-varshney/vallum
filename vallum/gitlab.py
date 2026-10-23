@@ -57,6 +57,10 @@ class GitLab:
             if resp.status_code in (429, 500, 502, 503, 504) and not last:
                 time.sleep(3 * (attempt + 1))
                 continue
+            if resp.status_code == 409 and "lock" in resp.text.lower() and not last:
+                # another job is editing the same issue at this moment (e.g. the Ledger): wait and retry
+                time.sleep(2 * (attempt + 1))
+                continue
             break
         if resp.status_code not in ok:
             raise GitLabError(resp.status_code, method, path, resp.text)
@@ -200,6 +204,26 @@ class GitLab:
 
     def edit_note(self, kind: str, iid: int, note_id: int, body: str) -> dict:
         return self.put(f"/projects/:id/{kind}/{iid}/notes/{note_id}", json={"body": body})
+
+    def issue(self, iid: int) -> dict:
+        return self.get(f"/projects/:id/issues/{iid}")
+
+    def recent(self, kind: str, since: str) -> list[dict]:
+        """Issues or merge requests updated since an ISO time (for scanning new comments)."""
+        return self.paged(f"/projects/:id/{kind}", updated_after=since, order_by="updated_at", limit=200)
+
+    def set_reviewers(self, iid: int, user_ids: list[int]):
+        return self.put(f"/projects/:id/merge_requests/{iid}", json={"reviewer_ids": user_ids or [0]})
+
+    def set_assignees(self, kind: str, iid: int, user_ids: list[int]):
+        return self.put(f"/projects/:id/{kind}/{iid}", json={"assignee_ids": user_ids or [0]})
+
+    def set_status(self, issue: dict, name: str) -> list:
+        """Set a work item's status by name (GraphQL). Returns GraphQL errors, [] on success."""
+        q = """mutation($id: WorkItemID!, $name: String!) { workItemUpdate(input: {id: $id, statusWidget: {name: $name}}) {
+          errors workItem { id } } }"""
+        res = self.graphql(q, {"id": f"gid://gitlab/WorkItem/{issue['id']}", "name": name})["workItemUpdate"]
+        return res.get("errors") or []
 
     def create_issue(self, title: str, description: str, labels: list[str] = ()) -> dict:
         return self.post("/projects/:id/issues", json={"title": title, "description": description, "labels": ",".join(labels)})

@@ -66,6 +66,7 @@
         },
         "where": {"type": "array", "minItems": 1, "items": {"enum": ["mr", "drive", "live"]}},
         "severity": {"enum": ["blocker", "major", "minor"]},
+        "replay": {"type": "boolean"},
         "learned_from": {"type": "string"},
         "applies_to": {}
       }

@@ -45,7 +45,7 @@ def test_loosening_is_detected():
     found = " | ".join(cardlib.loosenings(old, new))
     assert "limit loosened from 150 to 400" in found
     assert "tier lowered from core to standard" in found
-    assert "link-http-only was deleted" in found
+    assert "links/link-url-well-formed was deleted" in found
     assert "severity lowered" in found
 
 

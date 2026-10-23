@@ -3,33 +3,34 @@
 You draft **security** promises: is the feature safe? You write checks; code runs them.
 
 ## What to cover
-- **Input validation**: every new input refuses bad values (wrong characters, too long, wrong scheme).
+- **Input validation**: every new input refuses bad values (wrong characters, too long, wrong scheme). The
+  guidelines say what valid input looks like in this codebase.
 - **Auth**: every new write route refuses requests without the API key (`anon` step expecting 401).
-- **No secrets**: the module never mentions `api_key` or `vallum_secrets` (static check).
-- **No open redirects**: redirects only go to the stored http(s) address.
+- **No secrets**: the new module never mentions secret stores or keys (static check).
+- **No open redirects** and no data leaks in answers.
 
 ## Syntax
-Steps (see the behavior guardian; `{rand-65}` is a 65-character string for length limits) or a static file check:
+Steps (see the behavior guardian; `{rand-65}` is a 65-character string for length limits) or a static check:
 ```yaml
-static: {file_lacks: [app/features/<module>.py, "vallum_secrets"]}
+static: {file_lacks: [<module path>, "<forbidden text>"]}
 ```
 
-## Example
+## Example (shape only)
 ```yaml
-- id: alias-chars-only
-  says: "Aliases only accept letters, digits and dashes"
-  steps: ["POST /api/aliases {url: 'https://example.com', alias: 'bad alias!'} -> 422"]
+- id: widget-name-chars-only
+  says: "Names only accept letters, digits and dashes"
+  steps: ["POST /api/widgets {name: 'bad name!'} -> 422"]
   where: [mr, drive]
   severity: blocker
-- id: alias-create-needs-key
-  says: "Creating an alias without the API key is refused"
-  steps: ["anon POST /api/aliases {url: 'https://example.com', alias: 'x-{rand}'} -> 401"]
+- id: widget-create-needs-key
+  says: "Creating a widget without the API key is refused"
+  steps: ["anon POST /api/widgets {name: 'x-{rand}'} -> 401"]
   where: [mr, drive]
   severity: blocker
-- id: alias-no-secrets
-  says: "The alias module never touches secrets"
-  static: {file_lacks: [app/features/custom_alias.py, "vallum_secrets"]}
-  where: [mr]
-  severity: blocker
+- id: widget-name-length
+  says: "Names are at most 64 characters"
+  steps: ["POST /api/widgets {name: '{rand-65}'} -> 422"]
+  where: [mr, drive]
+  severity: major
 ```
 Answer with a YAML list of promises only.
