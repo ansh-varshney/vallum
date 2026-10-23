@@ -7,22 +7,29 @@ allowance permits. Agents write code, promises and explanations; **code decides 
 Built for the GitLab Transcend "Life After Code" hackathon (Path A, Hands-off).
 Live app: <https://vallum-256944994567.us-central1.run.app/status>
 
-> Status: **Layers 1 and 2** are in place. Layer 1 is the safe skeleton (promise checker, Gatekeeper, Merge Desk,
+> Status: **Layers 1, 2 and 3** are in place. Layer 1 is the safe skeleton (promise checker, Gatekeeper, Merge Desk,
 > deploy provenance gate, test drive on Cloud Run, state store, Notifier, Watchdog, visitor simulation).
-> Layer 2 adds the agents: five GitLab Duo flows published from this repo, with code still deciding what ships.
+> Layer 2 adds the agents: GitLab Duo flows published from this repo, with code still deciding what ships.
+> Layer 3 adds judgment (mistake allowances and modes, scoped freezes, `@vallum` commands, needs-human
+> escalation) and project context that works for any codebase.
 
 ## The agents (Layer 2)
 
 | Flow (`.gitlab/duo/flows/`) | Starts on | Does | Can't |
 |---|---|---|---|
-| **Ship** (`ship.yaml`) | Door A: a member moves a Feature issue to *In progress*. Door B: a member adds Vallum as reviewer | Flight Director supervises Planner, four guardians (behavior, speed, reliability, security), Builder and Reviewer; opens the MR | merge, deploy, touch protected paths |
+| **Ship** (`ship.yaml`) | Door A: a member moves a Feature issue to *In progress*. Door B: a member adds the Ship bot as reviewer. The Merge Desk adds it as reviewer for a review or fix round | Flight Director supervises Planner, four guardians (behavior, speed, reliability, security), Builder and Reviewer; opens the MR; pauses when the tier is Red; asks for a human when needed | merge, deploy, touch protected paths |
 | **Inspector** (`inspect.yaml`) | Merge Desk, through the Flows API | Checks the work against the request from a code-built evidence bundle only | use any tool; its verdict is read by code from the session |
-| **Pipeline Medic** (`medic.yaml`) | Merge Desk, when an MR pipeline fails (max 2) | Reads the real job logs and fixes the cause | change promises |
-| **Release Captain** (`release.yaml`) | Test drive, after a promotion | Release notes; closes the request issue | decide anything |
-| **Incident Commander** (`incident.yaml`) | Test drive, after a rollback | Postmortem, learned-promise MR, fix issue | edit existing files |
+| **Pipeline Medic** (`medic.yaml`) | Merge Desk assigns its bot as reviewer when an MR pipeline fails (max 2) | Reads the real job logs and fixes the cause | change promises |
+| **Release Captain** (`release.yaml`) | Test drive assigns its bot to the request after a promotion | Release notes from the release record; closes the request issue | decide anything |
+| **Incident Commander** (`incident.yaml`) | Test drive or Live Patrol assigns its bot to the incident issue | Postmortem, learned-promise MR, fix issue (built by itself: Door C) | edit existing files |
+| **Cockpit** (`cockpit.yaml`) | Someone mentions its bot | Explains, and turns plain requests into exact `@vallum` commands | carry anything out |
 
-The `flows-sync` job publishes these YAML files to the AI Catalog, enables them and records each flow's bot
-account. Verdicts only count from the right bot (Reviewer) or from the Inspector's own session trace.
+Code starts agents by **member-only actions** (assigning a flow's bot, moving an issue to *In progress*) with
+the owner's account, so each flow runs on its own service account and is billed to the namespace pool; the
+Flows API is used only for the Inspector and as a fallback. A daily cap on code-started sessions turns Safe
+mode on (credit guard). The `flows-sync` job publishes the YAML to the AI Catalog, enables each flow, keeps
+its triggers exactly as `vallum/flows/` lists them and records each bot account. Verdicts only count from the
+right bot (Reviewer) or from the Inspector's own session trace.
 GitLab Duo Code Review runs on every MR with instructions generated from the Rulebook
 (`.gitlab/duo/mr-review-instructions.yaml`). Each role's know-how is in `skills/<role>/SKILL.md`.
 
@@ -45,6 +52,41 @@ GitLab Duo Code Review runs on every MR with instructions generated from the Rul
 
 Emergency: run the manual job **`rollback-now`** in any `main` pipeline.
 
+## Judgment and controls (Layer 3)
+
+- **Mistake allowance and modes.** Every test-drive step and every Live Patrol run (a 30-second burst of
+  simulated visitors) counts good and bad visits per tier. Bad = failed, or slower than twice the route's speed
+  limit; a broken live behavior promise spends 5%. Core goes Red under 50% and back to Green over 65%;
+  Standard has Yellow (an extra test-drive step, a size cap) and Red. Experimental is always Green.
+- **Scoped freeze.** A change touching a Red tier is paused (MRs by the Merge Desk, issues by the Flight
+  Director) and its owner told why; it resumes by itself when the tier recovers. P0/P1 fixes still ship.
+- **Needs a human.** The Reviewer can answer `needs-human` with the decision and options; code stops all agent
+  work on that MR, labels it `vallum::needs-human` and alerts the owner. Removing the label resumes it.
+- **Commands** (members only, carried out by code on the next Live Patrol, every one audited):
+
+  | Comment | Does |
+  |---|---|
+  | `@vallum status` | Modes, allowances, release, queue |
+  | `@vallum pause` / `@vallum resume` | Safe mode on / off (resume also resets the circuit breaker) |
+  | `@vallum rollback <feature>` | Traffic back to the revision before that feature's release |
+  | `@vallum ship-anyway !<n>` | Overrides a freeze for one MR (recorded) |
+  | `@vallum tighten <promise-id> <limit>` | Opens an MR that makes a limit stricter |
+  | `@vallum explain !<n>` | Asks the Cockpit agent for a plain-English explanation |
+
+## Project context for any codebase
+
+Vallum's code and skills hold no project specifics. Each codebase provides its own:
+
+| File | Written by | Holds |
+|---|---|---|
+| `vallum/project.yaml` 🔒 | owner | language, layout, where features and tests go, start and test commands |
+| `docs/vallum/GUIDELINES.md` 🔒 | owner | conventions, limits, examples of good promises |
+| `docs/vallum/roles/<role>.md` 🔒 | owner | optional notes for one agent role |
+| `docs/vallum/CODEMAP.md` 🔒 | code (`python -m vallum.codemap`) | every module, route, Feature Card and test; refreshed by a housekeeping MR after each release |
+
+Every agent reads the guidelines, the code map and its role notes before acting. The code map generator
+reads Python by AST and JavaScript/TypeScript/Go/Java by pattern (see the Express fixture in `tests/fixtures/`).
+
 ## Repository
 
 | Path | What it is |
@@ -56,11 +98,16 @@ Emergency: run the manual job **`rollback-now`** in any `main` pipeline.
 | `vallum/gate/` | Gatekeeper (12 rules), provenance gate |
 | `vallum/desk/` | Merge Desk |
 | `vallum/drive/` | Test-drive controller (Cloud Run REST API, keyless login) |
-| `vallum/patrol/` | Live Patrol and Watchdog |
+| `vallum/patrol/` | Live Patrol (live checks, allowances, resumes, Door C, commands) and Watchdog |
+| `vallum/allowance.py` | Mistake allowance and modes |
+| `vallum/cockpit.py` | `@vallum` commands, parsed and carried out by code |
+| `vallum/agents.py` | Starts agents by member-only actions; credit guard |
+| `vallum/codemap/`, `vallum/housekeeping.py` | Code map generator; post-release housekeeping MR |
 | `vallum/notify/` | Status comments, alerts, Ledger |
-| `vallum/flows/` | Publishes the flows; starts them through the Flows API |
+| `vallum/flows/` | Publishes the flows and keeps their triggers |
 | `vallum/evidence/` | Evidence bundle for the Inspector (primary data only) |
-| `skills/` 🔒 | Know-how for each agent role |
+| `skills/` 🔒 | Know-how for each agent role (project-neutral) |
+| `docs/vallum/` 🔒 | This project's guidelines, role notes and generated code map |
 | `simulate/` | Visitor simulation run by CI jobs |
 | `deploy/service.yaml` | Cloud Run settings as code |
 
