@@ -100,8 +100,9 @@ class Patrol:
         if rolled_back:
             log(f"serving {revision}, older than the last release {rel.get('promoted_revision')} (rolled back on "
                 "purpose): live promise checks wait for the next release")
+        live_cards = self.live_cards()
         with core.client_for(self.url, timeout=15) as client:
-            for p in ([] if rolled_back else self.cards.promises(where="live")):
+            for p in ([] if rolled_back else live_cards.promises(where="live")):
                 if p.style != "steps":
                     continue
                 out = core.run_step_promise(client, p, key, float(self.pol["judge"]["step_retry_s"]))
@@ -116,6 +117,18 @@ class Patrol:
         allowance.record(self.store, counts, "patrol", spend, self.pol.window_minutes())
         log(f"visitors: {len(samples)} visits; bad: " + ", ".join(f"{t} {c['bad']}/{c['visits']}" for t, c in counts.items()))
         self.report_broken(broken, revision)
+
+    def live_cards(self) -> cardlib.CardSet:
+        """The promises of the code that is live, not of main: a feature can be merged but not released (refused
+        at step 0, or rolled back), and its promises would look broken in production (seen with the link preview)."""
+        live = self.store.live_commit(self.pol["cloud_run"]["service"])
+        if not live:
+            return self.cards
+        try:
+            return cardlib.load_from_gitlab(self.gl, live)
+        except Exception as exc:
+            log(f"could not read the cards of the live code ({live[:8]}): {exc}; using main's")
+            return self.cards
 
     def visitors(self, key: str | None) -> list[dict]:
         codes = (self.store.b.read("vallum_sim", "links") or {}).get("codes") or []

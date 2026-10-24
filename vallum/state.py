@@ -114,6 +114,17 @@ class Store:
         r.setdefault("slot", "idle")
         return r
 
+    def live_commit(self, service: str) -> str | None:
+        """The commit visitors are on now: recorded at promotion, or read from the revision name
+        (<service>-<sha7>-<pipeline>) for releases made before it was recorded."""
+        import re
+
+        rel = self.release()
+        if rel.get("promoted_commit"):
+            return rel["promoted_commit"]
+        m = re.match(re.escape(service) + r"-([0-9a-f]{7,40})-", rel.get("last_good") or "")
+        return m.group(1) if m else None
+
     def claim_release(self, expect_slots: tuple, **fields) -> dict:
         def fn(cur):
             slot = cur.get("slot", "idle")

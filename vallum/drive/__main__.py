@@ -9,7 +9,6 @@ Every step writes a verdict report, updates the state store and tells the change
 import asyncio
 import json
 import os
-import re
 import secrets
 import sys
 import time
@@ -209,18 +208,10 @@ class Drive:
                 "feature": ", ".join(names) or "app", "tier": tier, "author": os.environ.get("GITLAB_USER_LOGIN"),
                 "title": os.environ.get("CI_COMMIT_TITLE", "owner push"), "commit": sha, "owner_push": True}
 
-    def live_commit(self, rel: dict) -> str | None:
-        """The commit that visitors are on now: recorded at promotion, or read from the revision name
-        (<service>-<sha7>-<pipeline>) for releases made before it was recorded."""
-        if rel.get("promoted_commit"):
-            return rel["promoted_commit"]
-        m = re.match(re.escape(self.pol["cloud_run"]["service"]) + r"-([0-9a-f]{7,40})-", rel.get("last_good") or "")
-        return m.group(1) if m else None
-
     def widen(self, info: dict) -> dict:
         """Judge everything that changed since the live code, not only this merge request: a change that was
         rolled back stays merged in main, and the next release ships it again (seen with r-0006 → r-0007)."""
-        live = self.live_commit(self.store.release())
+        live = self.store.live_commit(self.pol["cloud_run"]["service"])
         if not live:
             return info
         try:

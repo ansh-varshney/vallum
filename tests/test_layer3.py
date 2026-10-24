@@ -845,3 +845,13 @@ def test_a_medic_that_needs_a_human_holds_the_mr():
     desk.send_medic({"iid": 12, "sha": "abc", "title": "x", "diverged_commits_count": 0})
     assert any(a[2] == "Needs a human" for a in desk.notify.alerts)
     assert gl.mr_calls[0][1] == ["vallum::needs-human"]
+
+
+
+def test_live_promises_come_from_the_live_code():
+    """Regression: the merged-but-refused link preview was reported broken in production by the Live Patrol."""
+    store = Store(MemoryState())
+    store.set_release(last_good="vallum-6ad46fd-2981156911")
+    assert store.live_commit("vallum") == "6ad46fd"
+    store.set_release(promoted_commit="80b955fcd46f")
+    assert store.live_commit("vallum") == "80b955fcd46f"
