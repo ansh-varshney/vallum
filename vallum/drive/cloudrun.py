@@ -15,6 +15,15 @@ class DeployFailed(Exception):
     pass
 
 
+def expected_split(traffic: list[dict]) -> dict:
+    """revision -> percent that a traffic spec asks for (entries with 0% only carry a tag)."""
+    out = {}
+    for t in traffic:
+        if t.get("percent"):
+            out[t["revisionName"]] = out.get(t["revisionName"], 0) + int(t["percent"])
+    return out
+
+
 class CloudRun:
     def __init__(self, session, project: str, region: str, service: str):
         self.s = session
@@ -75,11 +84,27 @@ class CloudRun:
         self._put(body)
         return self.wait_ready()
 
-    def set_traffic(self, traffic: list[dict]) -> dict:
+    def set_traffic(self, traffic: list[dict], timeout: float = 120) -> dict:
+        """Change the split and wait until Cloud Run reports that split as serving (status.traffic). Waiting for
+        the whole service to be Ready instead took up to two minutes after the routing had already changed."""
         svc = self.get()
         svc["spec"]["traffic"] = traffic
         self._put(svc)
-        return self.wait_ready(timeout=120)
+        return self.wait_traffic(expected_split(traffic), timeout=timeout)
+
+    def wait_traffic(self, expected: dict, timeout: float = 120, poll_s: float = 1.0) -> dict:
+        deadline = time.monotonic() + timeout
+        while True:
+            svc = self.get()
+            meta, status = svc.get("metadata", {}), svc.get("status", {})
+            if status.get("observedGeneration", 0) >= meta.get("generation", 1) and self.serving(svc) == expected:
+                return svc
+            ready = next((c for c in status.get("conditions", []) if c.get("type") == "Ready"), {})
+            if ready.get("status") == "False" and status.get("observedGeneration", 0) >= meta.get("generation", 1):
+                raise DeployFailed(f"{ready.get('reason')}: {ready.get('message')}")
+            if time.monotonic() > deadline:
+                raise DeployFailed(f"traffic did not reach {expected} in time")
+            time.sleep(poll_s)
 
     def ensure_public(self):
         url = f"https://run.googleapis.com/v1/projects/{self.project}/locations/{self.region}/services/{self.service}"

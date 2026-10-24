@@ -117,11 +117,12 @@ class Drive:
             log(f"started {key} flow ({via}) on {kind}/{iid}")
         return via
 
-    def spend(self, samples: list[dict], label: str):
-        """Every simulated visit during a traffic step is a visit: bad ones spend the mistake allowance."""
+    def spend(self, samples: list[dict], label: str, new_rev: str | None = None):
+        """Every simulated visit during a traffic step is a visit; the bad ones the new revision served spend
+        the mistake allowance."""
         tier_of, limits = allowance.route_profile(self.cards.cards)
         counts = allowance.count(samples, tier_of, limits, float(self.pol.get("allowance", {}).get("slow_factor", 2.0)),
-                                 warmup_s=float(self.pol["judge"]["warmup_s"]))
+                                 warmup_s=float(self.pol["judge"]["warmup_s"]), blame=new_rev)
         allowance.record(self.store, counts, label, None, self.pol.window_minutes())
         try:
             # modes follow at once (a slip can turn a tier Red mid-release), not at the next Live Patrol
@@ -325,7 +326,7 @@ class Drive:
             for s in samples:
                 per_rev.setdefault(s.get("revision") or "none", 0)
                 per_rev[s.get("revision") or "none"] += 1
-            counts = self.spend(samples, f"drive {rid} {pct}%")
+            counts = self.spend(samples, f"drive {rid} {pct}%", new_rev)
             self.report["steps"].append({"step": pct, "verdict": verdict, "elapsed_s": round(elapsed, 1), "rates": rates,
                                          "visits": len(samples), "by_revision": per_rev, "rows": rows,
                                          "allowance_counts": counts})

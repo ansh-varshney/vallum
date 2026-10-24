@@ -86,6 +86,41 @@ def test_bad_visits_are_failures_or_very_slow():
     assert counts["app"] == {"visits": 4, "bad": 2}
 
 
+def test_a_release_is_charged_only_for_its_own_bad_visits():
+    """Regression (r-0006): slow visits on the old revision under the simulator's load pushed app-wide to Yellow."""
+    samples = [{"route": "GET /r/{code}", "ok": True, "ms": 400, "t": 10, "revision": "new"},
+               {"route": "GET /r/{code}", "ok": True, "ms": 400, "t": 10, "revision": "old"},
+               {"route": "GET /r/{code}", "ok": True, "ms": 40, "t": 10, "revision": "old"}]
+    counts = allowance.count(samples, {"GET /r/{code}": "core"}, {"GET /r/{code}": 150}, blame="new")
+    assert counts["core"] == {"visits": 3, "bad": 1}
+
+
+def test_rollback_waits_for_the_traffic_split_not_full_readiness():
+    from vallum.drive.cloudrun import CloudRun, expected_split
+
+    assert expected_split([{"revisionName": "old", "percent": 100}, {"revisionName": "new", "percent": 0, "tag": "cand"}]) == {"old": 100}
+
+    class Session:
+        def __init__(self):
+            self.gets = 0
+
+        def get(self, url):
+            self.gets += 1
+            done = self.gets >= 3
+            body = {"metadata": {"generation": 5, "name": "vallum"}, "spec": {"traffic": []},
+                    "status": {"observedGeneration": 5 if done else 4,
+                               "traffic": [{"revisionName": "old" if done else "new", "percent": 100}],
+                               "conditions": [{"type": "Ready", "status": "Unknown"}]}}
+            return httpx.Response(200, json=body)
+
+        def put(self, url, json=None):
+            return httpx.Response(200, json=json)
+
+    cr = CloudRun(Session(), "p", "r", "vallum")
+    svc = cr.wait_traffic({"old": 100}, timeout=5, poll_s=0)
+    assert CloudRun.serving(svc) == {"old": 100}                  # returned although Ready is still Unknown
+
+
 def test_route_profile_reads_this_repos_cards():
     from vallum import cards as cardlib
 

@@ -42,8 +42,10 @@ def route_profile(cards: dict, service: dict | None = None) -> tuple[dict, dict]
 
 
 def count(samples: list[dict], tier_of: dict, limit: dict, slow_factor: float = 2.0, warmup_s: float = 0,
-          revision: str | None = None) -> dict:
-    """Good and bad visits per tier and app-wide. Bad = failed, or slower than slow_factor x the route's limit."""
+          revision: str | None = None, blame: str | None = None) -> dict:
+    """Good and bad visits per tier and app-wide. Bad = failed, or slower than slow_factor x the route's limit.
+    `blame`: during a test drive, only bad visits served by that (new) revision count against the allowance;
+    the old revision's slow visits under the simulator's load are not the release's fault."""
     out = {t: {"visits": 0, "bad": 0} for t in (*TIERS, "app")}
     for s in samples:
         if s.get("t", 0) < warmup_s or (revision is not None and s.get("revision") != revision):
@@ -51,6 +53,8 @@ def count(samples: list[dict], tier_of: dict, limit: dict, slow_factor: float = 
         tier = tier_of.get(s.get("route"))
         lim = limit.get(s.get("route"))
         bad = (not s.get("ok", False)) or (lim is not None and (s.get("ms") or 0) > lim * slow_factor)
+        if blame is not None and s.get("revision") != blame:
+            bad = False
         for key in ([tier] if tier in TIERS else []) + ["app"]:
             out[key]["visits"] += 1
             out[key]["bad"] += int(bad)
