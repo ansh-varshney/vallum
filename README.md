@@ -62,7 +62,9 @@ Emergency: run the manual job **`rollback-now`** in any `main` pipeline.
   Director) and its owner told why; it resumes by itself when the tier recovers. P0/P1 fixes still ship.
 - **Needs a human.** The Reviewer can answer `needs-human` with the decision and options; code stops all agent
   work on that MR, labels it `vallum::needs-human` and alerts the owner. Removing the label resumes it.
-- **Commands** (members only, carried out by code on the next Live Patrol, every one audited):
+- **Commands** (members only, carried out by code, every one audited). The first one runs on the next Live Patrol
+  (within about 10 minutes); after that, listen mode answers follow-ups within about 15 seconds for 20 minutes.
+  Picking the Cockpit bot from the `@vallum` autocomplete also gets an instant acknowledgement:
 
   | Comment | Does |
   |---|---|
@@ -72,6 +74,7 @@ Emergency: run the manual job **`rollback-now`** in any `main` pipeline.
   | `@vallum ship-anyway !<n>` | Overrides a freeze for one MR (recorded) |
   | `@vallum tighten <promise-id> <limit>` | Opens an MR that makes a limit stricter |
   | `@vallum explain !<n>` | Asks the Cockpit agent for a plain-English explanation |
+  | `@vallum listen <minutes>` / `@vallum listen off` | Keeps code checking for commands every 15 s (for a test or demo session) |
 
 ## Project context for any codebase
 
