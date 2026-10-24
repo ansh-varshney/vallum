@@ -89,7 +89,7 @@ cockpit:
   poll_s: 15                     # listen mode: how often code looks for new commands
   listen_after_command_min: 20   # after any command, keep listening this long (commands come in bursts)
   listen_max_min: 180            # longest `@vallum listen <minutes>`
-  job_listen_max_min: 8          # one Live Patrol job listens at most this long; the next scheduled one takes over
+  job_listen_max_min: 25         # one Live Patrol job listens at most this long; jobs overlap because schedules can start late
 
 agents:
   start_via_triggers: true       # code starts agents by member-only actions (namespace credits), API as fallback
