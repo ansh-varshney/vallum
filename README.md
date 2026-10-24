@@ -25,8 +25,8 @@ Live app: <https://vallum-256944994567.us-central1.run.app/status>
 | **Cockpit** (`cockpit.yaml`) | Someone mentions its bot | Explains, and turns plain requests into exact `@vallum` commands | carry anything out |
 
 Code starts agents by **member-only actions** (assigning a flow's bot, moving an issue to *In progress*) with
-the owner's account, so each flow runs on its own service account and is billed to the namespace pool; the
-Flows API is used only for the Inspector and as a fallback. A daily cap on code-started sessions turns Safe
+the owner's account, so each flow runs on its own service account (its credits still count against the member
+whose action fired it, as measured on 24 Oct); the Flows API is used only for the Inspector and as a fallback. A daily cap on code-started sessions turns Safe
 mode on (credit guard). The `flows-sync` job publishes the YAML to the AI Catalog, enables each flow, keeps
 its triggers exactly as `vallum/flows/` lists them and records each bot account. Verdicts only count from the
 right bot (Reviewer) or from the Inspector's own session trace.
