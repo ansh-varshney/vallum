@@ -302,6 +302,8 @@ class Desk:
             self.store.set_timeline(target, held_for=None, released_at=iso(), released_for=tl.get("held_for"),
                                     flow_runs=0)
             self.close_steps(mr["iid"], ["Needs a human"])
+            self.notify.status(MR, mr["iid"], "Needs a human", "done", note="released",
+                               now="You released the hold. Vallum is continuing.", action="nothing.")
             self.store.event("needs-human", f"!{mr['iid']}: released by a human", mr_iid=mr["iid"])
             return True
         return False
@@ -536,7 +538,8 @@ class Desk:
         self.log(f"next: !{iid} {head['title']}")
         self.gl.mr_labels(iid, add=[self.pol.label("ready")], remove=[self.pol.label("blocked")])
         self.notify.status(MR, iid, "Queued", "done", note="next", title=head["title"], priority=self.level(head),
-                           issue_iid=evidence.related_issue(head.get("description")), now="Picked up by the Merge Desk.")
+                           issue_iid=evidence.related_issue(head.get("description")), now="Picked up by the Merge Desk.",
+                           action="nothing.")
         found = self.agent_verdicts(head)
         if found is None:
             self.notify.ledger()
