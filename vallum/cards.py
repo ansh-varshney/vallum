@@ -84,14 +84,22 @@ def parse_card_text(text: str):
     return yaml.safe_load(text) or {}
 
 
+def _card_key(cs: CardSet, card: dict, stem: str) -> str:
+    """Cards are keyed by feature name. A second card for the same feature (for example a bug-fix card next to
+    the feature's own card) keeps its own key, so neither card's promises are silently dropped."""
+    name = card.get("feature", stem) if isinstance(card, dict) else stem
+    return name if name not in cs.cards else f"{name}@{stem}"
+
+
 def load_from_dir(root: Path = ROOT) -> CardSet:
     cs = CardSet()
     for path in sorted((root / CARDS_DIR).glob("*.yaml")):
         rel = path.relative_to(root).as_posix()
         try:
             card = parse_card_text(path.read_text(encoding="utf-8"))
-            cs.cards[card.get("feature", path.stem)] = card
-            cs.paths[card.get("feature", path.stem)] = rel
+            key = _card_key(cs, card, path.stem)
+            cs.cards[key] = card
+            cs.paths[key] = rel
         except yaml.YAMLError as exc:
             cs.errors.append((rel, f"is not valid YAML: {exc}"))
     service = root / "promises" / "service.yaml"
@@ -111,8 +119,9 @@ def load_from_gitlab(gitlab, ref: str) -> CardSet:
             continue
         try:
             card = parse_card_text(gitlab.file_raw(entry["path"], ref))
-            cs.cards[card.get("feature", Path(entry["path"]).stem)] = card
-            cs.paths[card.get("feature", Path(entry["path"]).stem)] = entry["path"]
+            key = _card_key(cs, card, Path(entry["path"]).stem)
+            cs.cards[key] = card
+            cs.paths[key] = entry["path"]
         except yaml.YAMLError as exc:
             cs.errors.append((entry["path"], f"is not valid YAML: {exc}"))
     text = gitlab.file_raw_or_none("promises/service.yaml", ref)

@@ -855,3 +855,33 @@ def test_live_promises_come_from_the_live_code():
     assert store.live_commit("vallum") == "6ad46fd"
     store.set_release(promoted_commit="80b955fcd46f")
     assert store.live_commit("vallum") == "80b955fcd46f"
+
+
+FIX_CARD = """feature: redirect
+kind: bug-fix
+tier: core
+promises:
+  behavior:
+    - {id: old-links-work, says: Old links work, steps: ['GET /health -> 200'], where: [mr], severity: blocker}
+"""
+BASE_CARD = """feature: redirect
+kind: new-endpoint
+tier: core
+promises:
+  behavior:
+    - {id: redirect-works, says: Redirects work, steps: ['GET /health -> 200'], where: [mr], severity: blocker}
+"""
+
+
+def test_two_cards_for_one_feature_both_count(tmp_path):
+    """Regression (!13): a fix card with `feature: redirect` next to base-redirect.yaml hid one of the two."""
+    from vallum import cards as cardlib
+
+    d = tmp_path / "promises" / "features"
+    d.mkdir(parents=True)
+    (d / "6-redirect.yaml").write_text(FIX_CARD, encoding="utf-8")
+    (d / "base-redirect.yaml").write_text(BASE_CARD, encoding="utf-8")
+    cs = cardlib.load_from_dir(tmp_path)
+    assert set(cs.cards) == {"redirect", "redirect@base-redirect"}
+    assert {p.id for p in cs.promises(include_service=False)} == {"old-links-work", "redirect-works"}
+    assert any(c.get("kind") == "bug-fix" for c in cs.cards.values())
