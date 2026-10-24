@@ -245,6 +245,17 @@ def test_notes_are_the_newest_ones_in_order():
     assert calls["params"]["sort"] == "desc"                      # regression: the Ledger had 610 notes
 
 
+def test_a_comment_missed_by_a_lagging_scan_is_still_carried_out():
+    """Regression: `@vallum resume` was posted 2 s before a scan that read a lagging replica; the next scans
+    only looked after that scan's start, so the command was never seen."""
+    store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
+    store.update(cockpit.DOC, lambda cur: {**cur, "last_scan": iso(utcnow() - timedelta(seconds=20))})
+    late = cnote(5, 10, "@vallum resume", minutes_ago=5)                 # older than the last scan
+    gl = CockpitGL([late], access={10: 30})
+    assert cockpit.Cockpit(gl, store, pol, notify).run() == ["resume by user10"]
+    assert cockpit.Cockpit(gl, store, pol, notify).run() == []          # and only once
+
+
 def test_cockpit_ship_anyway_and_resume():
     store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
     store.update("meta", lambda cur: {**cur, "safe_mode": True, "rollbacks": ["x"]})

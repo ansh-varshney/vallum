@@ -81,7 +81,11 @@ class Cockpit:
 
     def run(self, lookback_minutes: float = 60) -> list[str]:
         state = self.store.doc(DOC)
-        since = state.get("last_scan") or iso(utcnow() - timedelta(minutes=lookback_minutes))
+        # Re-read a generous window every time: GitLab.com may answer from a replica that is a few seconds behind,
+        # so a comment made just before the last scan can still be missing from it. Claims stop double runs.
+        rescan = timedelta(minutes=float(self.pol.get("cockpit", {}).get("rescan_minutes", 30)))
+        last = parse_iso(state.get("last_scan"))
+        since = iso(min(last, utcnow() - rescan) if last else utcnow() - timedelta(minutes=lookback_minutes))
         done = set(state.get("done", []))
         started = iso()
         handled = []
