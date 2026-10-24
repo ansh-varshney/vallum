@@ -1,0 +1,70 @@
+# Feature Card: link preview page, shows where a short link goes before the visitor continues.
+feature: link-preview
+issue: 8
+kind: ui-page
+tier: experimental
+priority: P3
+owns:
+  routes: ["GET /p/{code}"]
+  files: [app/features/link_preview.py, tests/test_link_preview.py]
+flag: link_preview
+promises:
+  behavior:
+    - id: link-preview-shows-destination
+      says: "/p/{code} for a real link shows its destination and a Continue link"
+      steps:
+        - "POST /api/links {url: 'https://example.com/page-{rand}'} -> 201 => link"
+        - "GET /p/{link.code} -> 200 contains https://example.com/page-{rand} contains Continue"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: link-preview-unknown-404
+      says: "/p/{code} for an unknown code answers 404"
+      steps:
+        - "GET /p/unknown-{rand} -> 404"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: link-preview-no-secrets
+      says: "The page shows no secrets or API keys"
+      steps:
+        - "POST /api/links {url: 'https://example.com/secret-{rand}'} -> 201 => link"
+        - "GET /p/{link.code} -> 200 contains https://example.com/secret-{rand}"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: link-preview-odd-code-404
+      says: "Odd codes that don't match the code format answer 404"
+      steps:
+        - "GET /p/code@invalid -> 404"
+      where: [mr, drive, live]
+      severity: major
+  speed:
+    - id: link-preview-fast
+      says: "95% of link preview page loads finish in under 500 ms"
+      measure: "p95(latency, route='GET /p/{code}') < 500ms"
+      where: [mr, drive, live]
+      severity: major
+  security:
+    - id: preview-no-secrets
+      says: "The preview page shows no secrets or API keys"
+      static: {file_lacks: [app/features/link_preview.py, "vallum_secrets"]}
+      where: [mr, drive]
+      severity: blocker
+    - id: preview-no-api-key
+      says: "The preview page never mentions the API key"
+      static: {file_lacks: [app/features/link_preview.py, "X-API-Key"]}
+      where: [mr, drive]
+      severity: blocker
+    - id: preview-rejects-odd-codes
+      says: "Codes with traversal or invalid characters answer 404"
+      steps:
+        - "GET /p/../etc/passwd -> 404"
+        - "GET /p/code%00null -> 404"
+        - "GET /p/code@invalid -> 404"
+      where: [mr, drive]
+      severity: blocker
+    - id: preview-html-escapes-destination
+      says: "Destination URLs are HTML-escaped in both text and href attributes"
+      steps:
+        - "POST /api/links {url: 'https://example.com/search?q=a&b=c'} -> 201 => link"
+        - "GET /p/{link.code} -> 200 contains q=a&amp;b=c"
+      where: [mr, drive]
+      severity: blocker
