@@ -37,6 +37,11 @@ def parse(body: str, names: tuple[str, ...] = ("vallum",)) -> list[tuple[str, st
     return [(m.group(1).lower(), m.group(2).strip()) for m in _pattern(names).finditer(text)]
 
 
+def is_ours(body: str) -> bool:
+    """Notes Vallum's code wrote itself (with the owner's account): never read back as commands."""
+    return body.lstrip().startswith("🛡 Vallum") or "(asked with `@vallum explain`)" in body
+
+
 def parse_ref(arg: str) -> tuple[str, int] | None:
     m = _REF.search(arg or "")
     if not m:
@@ -98,7 +103,7 @@ class Cockpit:
                     if note.get("system") or parse_iso(changed) < parse_iso(since):
                         continue
                     author = note.get("author") or {}
-                    if author.get("username") in bots or (note.get("body") or "").startswith("🛡 Vallum"):
+                    if author.get("username") in bots or is_ours(note.get("body") or ""):
                         continue
                     # each command in a comment runs once; a comment edited to add a command runs only the new one
                     for cmd, arg in parse(note.get("body", ""), names):
@@ -238,7 +243,7 @@ class Cockpit:
         if not bot:
             return "the Cockpit agent isn't enabled yet."
         sign = "!" if ref[0] == "merge_requests" else "#"
-        self.gl.add_note(kind, iid, f"@{bot} explain {sign}{ref[1]} for @{who} (asked with `@vallum explain`)")
+        self.gl.add_note(kind, iid, f"🛡 Vallum: @{bot} please explain {sign}{ref[1]} for @{who} (asked with `@vallum explain`)")
         return "asked the Cockpit agent; its answer is an AI-written summary with links to the evidence."
 
     def do_tighten(self, kind, iid, arg, who) -> str:

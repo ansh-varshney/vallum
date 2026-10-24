@@ -256,6 +256,26 @@ def test_a_comment_missed_by_a_lagging_scan_is_still_carried_out():
     assert cockpit.Cockpit(gl, store, pol, notify).run() == []          # and only once
 
 
+def test_explain_does_not_read_its_own_note_back_as_a_command():
+    """Regression: `@vallum explain !5` posted `@<cockpit bot> explain !5 ...`, which was read back as a new
+    command every 15 s (a loop of Cockpit sessions)."""
+    class Flows:
+        def registry(self, key):
+            return {"service_account": "ai-vallum-cockpit-gitlab-ai-hackathon"}
+
+        def bots(self):
+            return {"ai-vallum-cockpit-gitlab-ai-hackathon": "cockpit"}
+
+    store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
+    gl = CockpitGL([cnote(1, 10, "@vallum explain !5")], access={10: 30})
+    pit = cockpit.Cockpit(gl, store, pol, notify, Flows())
+    assert pit.run() == ["explain by user10"]
+    asked = [b for _k, _i, b in gl.added if "please explain" in b][0]
+    gl.items[("issues", 9)].append(cnote(2, 10, asked))            # the note code posted, as the owner
+    assert pit.run() == []
+    assert cockpit.is_ours("@ai-vallum-cockpit-gitlab-ai-hackathon explain !5 for @x (asked with `@vallum explain`)")
+
+
 def test_cockpit_ship_anyway_and_resume():
     store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
     store.update("meta", lambda cur: {**cur, "safe_mode": True, "rollbacks": ["x"]})
