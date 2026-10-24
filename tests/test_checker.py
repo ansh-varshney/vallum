@@ -78,6 +78,8 @@ def test_every_base_mr_promise_holds_on_the_app(client):
         if p.style == "steps":
             out = core.run_step_promise(client, p, "test-key", retry_s=0)
         elif p.style == "measure":
+            if parse_measure(p.data["measure"]).filters:
+                continue        # e.g. popular == 1: only the checker's and the test drive's traffic carries these tags
             out = core.judge_single(p, samples, 20)
         elif p.style == "static":
             out = core.run_static_promise(p, config.ROOT)
