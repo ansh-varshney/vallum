@@ -27,8 +27,8 @@ promises:
       severity: major
   speed:
     - id: link-details-fast
-      says: "95% of link lookups finish in under 300 ms"
-      measure: "p95(latency, route='GET /api/links/{code}') < 300ms"
+      says: "95% of link lookups finish in under 250 ms"
+      measure: "p95(latency, route='GET /api/links/{code}') < 250ms"
       where: [mr, drive, live]
       severity: major
   reliability:
