@@ -192,6 +192,8 @@ class WatchGL:
         return self.mrs
 
     def get(self, path, **params):
+        if path.endswith("/pipelines"):
+            return [{"id": 7, "status": getattr(self, "pipe", "success")}]
         return self.jobs
 
     def post(self, path, json=None):
@@ -219,6 +221,43 @@ def test_watcher_acknowledges_a_released_hold_and_runs_the_desk_at_once():
     clock["t"] += 300
     gl.mrs[0]["sha"] = "c"
     assert w.tick() is True and len(gl.retried) == 1              # the desk is already running
+
+
+def test_a_finished_pipeline_wakes_the_desk():
+    from vallum.watch import Watcher
+
+    store, pol, notify, gl = Store(MemoryState()), policy(), FakeNotify(), WatchGL()
+    w = Watcher(gl, store, pol, notify, log=lambda m: None, pipeline_id="555", clock=lambda: 10_000.0)
+    w.tick()
+    gl.pipe = "failed"                                            # same commit, same merge state, pipeline failed
+    assert w.tick() is True and gl.retried == ["/projects/:id/jobs/100/retry"]
+
+
+def test_needs_human_beats_the_medic_on_a_failed_pipeline():
+    """Regression (MR !10): the Reviewer said needs-human but the pipeline had failed, so the desk went the Medic
+    way and never held the MR."""
+    from vallum.desk.__main__ import Desk
+
+    class GL(LabelGL):
+        def notes(self, kind, iid, limit=500):
+            return [{"id": 77, "author": {"username": "ai-vallum-ship-gitlab-ai-hackathon"},
+                     "body": '🛡 Vallum: **Reviewer verdict** · needs-human\n```json\n{"verdict": "needs-human", "sha": "abc", '
+                             '"decision_needed": "90 days or never?", "options": ["90 days", "never"]}\n```',
+                     "created_at": "2026-10-24T16:12:49Z"}]
+
+    class Flows:
+        def bots(self):
+            return {"ai-vallum-ship-gitlab-ai-hackathon": "ship"}
+
+    desk = Desk.__new__(Desk)
+    desk.store, desk.pol, desk.notify, desk.gl, desk.flows = Store(MemoryState()), policy(), FakeNotify(), GL(), Flows()
+    mr = {"iid": 10, "title": "x", "description": "", "labels": ["vallum"], "sha": "abc"}
+    assert desk.escalated(mr) is True
+    assert desk.gl.mr_calls[0][1] == ["vallum::needs-human"]
+    assert any(a[2] == "Needs a human" for a in desk.notify.alerts)
+    held = {**mr, "labels": ["vallum", "vallum::needs-human"]}
+    assert desk.escalated(held) is True                            # still held: no Medic
+    assert desk.escalated(mr) is False                             # the owner removed the label: carry on
 
 
 def test_mr_activity_switches_listen_mode_on():

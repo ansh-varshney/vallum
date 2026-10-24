@@ -20,9 +20,9 @@ DOC = "watch"
 RUNNING = {"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"}
 
 
-def fingerprint(mr: dict, needs_human: str) -> list:
+def fingerprint(mr: dict, needs_human: str, pipeline: str | None = None) -> list:
     return [mr.get("sha"), mr.get("detailed_merge_status"), needs_human in (mr.get("labels") or []),
-            sorted(r.get("id") for r in mr.get("reviewers") or [])]
+            sorted(r.get("id") for r in mr.get("reviewers") or []), pipeline]
 
 
 class Watcher:
@@ -36,7 +36,7 @@ class Watcher:
         needs_human = self.pol.label("needs_human")
         mrs = self.gl.open_mrs(self.pol.label("opt_in")) or []
         before = self.store.doc(DOC).get("mrs")
-        now = {str(m["iid"]): fingerprint(m, needs_human) for m in mrs}
+        now = {str(m["iid"]): fingerprint(m, needs_human, self.pipeline_status(m["iid"])) for m in mrs}
         if before is None:                      # first look ever: remember, don't react
             self.store.update(DOC, lambda cur: {**cur, "mrs": now})
             return False
@@ -51,6 +51,14 @@ class Watcher:
         self.log(f"watch: change on {', '.join('!' + i for i in changed)}")
         self.kick_desk()
         return True
+
+    def pipeline_status(self, iid: int) -> str | None:
+        """The MR's latest pipeline (a failure or a pass must wake the desk even if the merge state is unchanged)."""
+        try:
+            pipes = self.gl.get(f"/projects/:id/merge_requests/{iid}/pipelines", per_page=1) or []
+        except Exception:
+            return None
+        return f"{pipes[0].get('id')}:{pipes[0].get('status')}" if pipes else None
 
     def hold_released(self, iid: int):
         tl = self.store.timeline(f"{MR}-{iid}")

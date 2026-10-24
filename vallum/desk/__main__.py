@@ -419,6 +419,20 @@ class Desk:
         self.store.event("agent", f"!{mr['iid']}: Inspector says {verdict['verdict']}", mr_iid=mr["iid"])
         return verdict
 
+    def escalated(self, mr: dict) -> bool:
+        """A person's decision comes before any automatic fixing: if the Reviewer's latest verdict on this MR is
+        needs-human (and no one has released it), hold the MR now, whatever its pipeline says."""
+        target = f"{MR}-{mr['iid']}"
+        tl = self.store.timeline(target)
+        if tl.get("held_for"):
+            return not self.human_released(mr)
+        review = verdicts.latest(self.gl.notes(MR, mr["iid"]), self.flows.bots()).get("review")
+        if review and review.get("verdict") == "needs-human" and tl.get("released_for") != review.get("note_id"):
+            self.hold_for_human(mr, review.get("decision_needed") or "The Reviewer asked for a person's decision.",
+                                review.get("options") or [], note_id=review.get("note_id"))
+            return True
+        return False
+
     def send_medic(self, mr: dict, reason: str = "pipeline failed"):
         """A Vallum MR whose pipeline failed (or whose rebase conflicted): the Medic gets at most 2 attempts (B19)."""
         target = f"{MR}-{mr['iid']}"
@@ -519,8 +533,9 @@ class Desk:
         candidates.sort(key=lambda m: priority.queue_key(self.level(m), m.get("created_at")))
         self.save_queue(candidates, waiting, failed, paused, held, refused)
         for mr in failed:
-            if mr not in held:
-                self.send_medic(mr)
+            if mr in held or self.escalated(mr):
+                continue
+            self.send_medic(mr)
         for pos, mr in enumerate(candidates[1:], 2):
             tl = self.store.timeline(f"{MR}-{mr['iid']}")
             if tl.get("queue_pos") != pos:
