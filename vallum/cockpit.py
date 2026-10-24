@@ -37,6 +37,20 @@ def parse(body: str, names: tuple[str, ...] = ("vallum",)) -> list[tuple[str, st
     return [(m.group(1).lower(), m.group(2).strip()) for m in _pattern(names).finditer(text)]
 
 
+def tightened_says(says: str, measure: str, new_limit_text: str) -> str:
+    """The promise's plain-English text with the old limit replaced by the new one ("under 300 ms" -> "under
+    250 ms"), so the words and the check never disagree. If the old limit isn't in the text, it is added."""
+    old = measure.rsplit("<", 1)[1].strip()
+    m = re.match(r"([\d.]+)\s*([a-z%]*)", old, re.I)
+    n = re.match(r"([\d.]+)\s*([a-z%]*)", new_limit_text.strip(), re.I)
+    if not m or not n:
+        return says
+    pattern = re.compile(r"(?<![\d.])" + re.escape(m.group(1)) + r"(\s*)" + re.escape(m.group(2)) + r"(?![a-z])", re.I)
+    if pattern.search(says):
+        return pattern.sub(lambda x: n.group(1) + x.group(1) + (n.group(2) or m.group(2)), says, count=1)
+    return f"{says} (limit {new_limit_text.strip()})"
+
+
 def is_ours(body: str) -> bool:
     """Notes Vallum's code wrote itself (with the owner's account): never read back as commands."""
     return body.lstrip().startswith("🛡 Vallum") or "(asked with `@vallum explain`)" in body
@@ -261,6 +275,10 @@ class Cockpit:
                     if p.get("id") == pid and "measure" in p:
                         new_measure = tightened(p["measure"], new)
                         updated = text.replace(p["measure"], new_measure, 1)
+                        says = p.get("says") or ""
+                        new_says = tightened_says(says, p["measure"], new)
+                        if says and new_says != says:
+                            updated = updated.replace(says, new_says, 1)
                         branch = f"vallum/tighten-{pid}-{utcnow().strftime('%H%M%S')}"
                         self.gl.post("/projects/:id/repository/commits", json={
                             "branch": branch, "start_branch": "main", "commit_message": f"Tighten {pid}: {new_measure}",
@@ -268,6 +286,7 @@ class Cockpit:
                         mr = self.gl.post("/projects/:id/merge_requests", json={
                             "source_branch": branch, "target_branch": "main", "remove_source_branch": True,
                             "title": f"Tighten promise {pid} ({new})", "labels": self.pol.label("opt_in"),
-                            "description": f"Requested by @{who} with `@vallum tighten`.\n\n`{p['measure']}` → `{new_measure}`"})
+                            "description": f"Requested by @{who} with `@vallum tighten`.\n\n`{p['measure']}` → `{new_measure}`"
+                                           + (f"\n\n\"{says}\" → \"{new_says}\"" if new_says != says else "")})
                         return f"opened !{mr['iid']} to make `{pid}` stricter; it goes through the usual checks."
         return f"no metric promise called `{pid}` on main."

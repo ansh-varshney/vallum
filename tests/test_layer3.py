@@ -171,6 +171,16 @@ def test_a_command_is_claimed_once_even_with_two_scanners():
     assert a.claim("1:pause") is True and b.claim("1:pause") is False
 
 
+def test_tighten_also_updates_the_plain_english_text():
+    """Regression: MR !7 changed the limit to 250 ms but left `says` at 300 ms; GitLab Duo requested changes."""
+    m = "p95(latency, route='GET /api/links/{code}') < 300ms"
+    assert cockpit.tightened_says("95% of link lookups finish in under 300 ms", m, "250ms") == \
+        "95% of link lookups finish in under 250 ms"
+    assert cockpit.tightened_says("Lookups are quick", m, "250ms") == "Lookups are quick (limit 250ms)"
+    assert cockpit.tightened_says("Under 0.5% fail", "error_rate(route='x') < 0.5%", "0.2%") == "Under 0.2% fail"
+    assert cockpit.tightened_says("95% finish in 1300 ms", m, "250ms") == "95% finish in 1300 ms (limit 250ms)"
+
+
 def test_tighten_only_makes_limits_stricter():
     m = "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
     assert cockpit.tightened(m, "120ms") == "p95(latency, route='GET /r/{code}', popular == 1) < 120ms"
