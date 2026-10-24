@@ -1,0 +1,8 @@
+id: redirect-old-links-fast
+learned_from: "incident #5"
+type: speed
+says: "Redirects of popular, older links stay under 150 ms, not only links created a moment ago"
+measure: "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
+replay: true
+where: [mr, drive, live]
+severity: blocker
