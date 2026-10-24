@@ -181,6 +181,54 @@ def test_tighten_also_updates_the_plain_english_text():
     assert cockpit.tightened_says("95% finish in 1300 ms", m, "250ms") == "95% finish in 1300 ms (limit 250ms)"
 
 
+class WatchGL:
+    def __init__(self):
+        self.mrs = [{"iid": 9, "sha": "a", "detailed_merge_status": "requested_changes",
+                     "labels": ["vallum", "vallum::needs-human"], "reviewers": [{"id": 5}]}]
+        self.jobs = [{"id": 100, "name": "merge-desk", "status": "success"}, {"id": 99, "name": "live-patrol", "status": "running"}]
+        self.retried = []
+
+    def open_mrs(self, label):
+        return self.mrs
+
+    def get(self, path, **params):
+        return self.jobs
+
+    def post(self, path, json=None):
+        self.retried.append(path)
+        return {"id": 101}
+
+
+def test_watcher_acknowledges_a_released_hold_and_runs_the_desk_at_once():
+    """User feedback: after removing vallum::needs-human nothing visible happened until the next schedule."""
+    from vallum.watch import Watcher
+
+    store, pol, notify, gl = Store(MemoryState()), policy(), FakeNotify(), WatchGL()
+    store.set_timeline("merge_requests-9", held_for=77)
+    clock = {"t": 1000.0}
+    w = Watcher(gl, store, pol, notify, log=lambda m: None, pipeline_id="555", clock=lambda: clock["t"])
+    assert w.tick() is False                                      # first look only remembers
+    gl.mrs[0]["labels"] = ["vallum"]                              # the owner removed the hold
+    assert w.tick() is True
+    assert ("merge_requests", 9, "Needs a human", "done") in notify.statuses
+    assert gl.retried == ["/projects/:id/jobs/100/retry"]
+    gl.mrs[0]["sha"] = "b"                                        # another change 30 s later: no second kick yet
+    clock["t"] += 30
+    assert w.tick() is True and len(gl.retried) == 1
+    gl.jobs[0]["status"] = "running"
+    clock["t"] += 300
+    gl.mrs[0]["sha"] = "c"
+    assert w.tick() is True and len(gl.retried) == 1              # the desk is already running
+
+
+def test_mr_activity_switches_listen_mode_on():
+    store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
+    pit = cockpit.Cockpit(CockpitGL([], access={}), store, pol, notify)
+    assert pit.listening_until() is None
+    pit.listen(budget_s=0, poll_s=15, sleep=lambda s: None, clock=lambda: 0.0, tick=lambda: True)
+    assert pit.listening_until() > utcnow()
+
+
 def test_tighten_only_makes_limits_stricter():
     m = "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
     assert cockpit.tightened(m, "120ms") == "p95(latency, route='GET /r/{code}', popular == 1) < 120ms"

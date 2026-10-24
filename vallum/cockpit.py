@@ -131,9 +131,12 @@ class Cockpit:
     def listening_until(self):
         return parse_iso(self.store.doc(DOC).get("listen_until"))
 
-    def listen(self, budget_s: float, poll_s: float = 15, sleep=time.sleep, clock=time.monotonic) -> list[str]:
-        """Scan once; then, while listen mode is on, scan again every `poll_s` seconds for up to `budget_s`."""
+    def listen(self, budget_s: float, poll_s: float = 15, sleep=time.sleep, clock=time.monotonic,
+               tick=None) -> list[str]:
+        """Scan once; then, while listen mode is on, scan again every `poll_s` seconds for up to `budget_s`.
+        `tick` (the MR watcher) runs on every pass; any change on a Vallum MR switches listen mode on."""
         handled = self.run()
+        self._tick(tick)
         end = clock() + budget_s
         while clock() + poll_s < end:
             until = self.listening_until()
@@ -141,7 +144,17 @@ class Cockpit:
                 break
             sleep(poll_s)
             handled += self.run()
+            self._tick(tick)
         return handled
+
+    def _tick(self, tick):
+        if not tick:
+            return
+        try:
+            if tick():
+                self.keep_listening(float(self.pol.get("cockpit", {}).get("listen_after_command_min", 20)))
+        except Exception as exc:  # watching must never stop the listener
+            print(f"[cockpit] watch failed: {type(exc).__name__}: {exc}", flush=True)
 
     def keep_listening(self, minutes: float):
         until = iso(utcnow() + timedelta(minutes=minutes))

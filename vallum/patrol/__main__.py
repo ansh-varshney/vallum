@@ -24,6 +24,7 @@ from vallum.flows import Flows
 from vallum.gitlab import GitLab
 from vallum.notify import Notifier
 from vallum.patrol.watchdog import Watchdog
+from vallum.watch import Watcher
 from vallum.state import Store
 
 ISSUES = "issues"
@@ -343,7 +344,9 @@ class Patrol:
         cfg = self.pol.get("cockpit", {})
         cockpit = Cockpit(self.gl, self.store, self.pol, self.notify, self.flows, rollback=self.rollback_feature)
         try:
-            done = cockpit.listen(budget_s=60 * float(cfg.get("job_listen_max_min", 8)), poll_s=float(cfg.get("poll_s", 15)))
+            watcher = Watcher(self.gl, self.store, self.pol, self.notify, log=log)
+            done = cockpit.listen(budget_s=60 * float(cfg.get("job_listen_max_min", 8)), poll_s=float(cfg.get("poll_s", 15)),
+                                  tick=watcher.tick)
             until = cockpit.listening_until()
             log("cockpit: " + (", ".join(done) if done else "nothing")
                 + (f" (listen mode until {until.strftime('%H:%M')} UTC)" if until and until > utcnow() else ""))

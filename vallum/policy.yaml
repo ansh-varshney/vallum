@@ -90,6 +90,7 @@ cockpit:
   rescan_minutes: 30             # every scan re-reads this window (replica lag); each command still runs once
   listen_after_command_min: 20   # after any command, keep listening this long (commands come in bursts)
   listen_max_min: 180            # longest `@vallum listen <minutes>`
+  desk_kick_min_s: 120           # listen mode re-runs the Merge Desk at once when a Vallum MR changes, at most this often
   job_listen_max_min: 25         # one Live Patrol job listens at most this long; jobs overlap because schedules can start late
 
 agents:
