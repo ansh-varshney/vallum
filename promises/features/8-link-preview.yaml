@@ -20,6 +20,8 @@ promises:
     - id: link-preview-unknown-404
       says: "/p/{code} for an unknown code answers 404"
       steps:
+        - "POST /api/links {url: 'https://example.com/ff-{rand}'} -> 201 => link"
+        - "GET /p/{link.code} -> 200"
         - "GET /p/unknown-{rand} -> 404"
       where: [mr, drive, live]
       severity: blocker
@@ -33,6 +35,8 @@ promises:
     - id: link-preview-odd-code-404
       says: "Odd codes that don't match the code format answer 404"
       steps:
+        - "POST /api/links {url: 'https://example.com/ff-{rand}'} -> 201 => link"
+        - "GET /p/{link.code} -> 200"
         - "GET /p/code@invalid -> 404"
       where: [mr, drive, live]
       severity: major
@@ -56,6 +60,8 @@ promises:
     - id: preview-rejects-odd-codes
       says: "Codes with traversal or invalid characters answer 404"
       steps:
+        - "POST /api/links {url: 'https://example.com/ff-{rand}'} -> 201 => link"
+        - "GET /p/{link.code} -> 200"
         - "GET /p/../etc/passwd -> 404"
         - "GET /p/code%00null -> 404"
         - "GET /p/code@invalid -> 404"

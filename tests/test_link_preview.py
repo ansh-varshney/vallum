@@ -30,10 +30,14 @@ def test_preview_works_for_aliases(client):
 
 
 def test_unknown_code_is_404(client):
+    code = make(client, "https://example.com/ff-1")
+    assert client.get(f"/p/{code}").status_code == 200
     assert client.get("/p/unknown-1").status_code == 404
 
 
 def test_odd_codes_are_404(client):
+    code = make(client, "https://example.com/ff-2")
+    assert client.get(f"/p/{code}").status_code == 200
     for bad in ["code@invalid", "code%00null", "code%0A", "bad_code", "a.b", "x" * 65, "caf%C3%A9"]:
         assert client.get(f"/p/{bad}").status_code == 404, bad
     assert client.get("/p/../etc/passwd").status_code == 404
