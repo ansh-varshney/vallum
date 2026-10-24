@@ -419,6 +419,15 @@ class Desk:
         self.store.event("agent", f"!{mr['iid']}: Inspector says {verdict['verdict']}", mr_iid=mr["iid"])
         return verdict
 
+    def member_mr(self, iid: int) -> bool:
+        """Door B: the MR's first commit was written by a person, not by one of Vallum's agents."""
+        commits = self.gl.paged(f"/projects/:id/merge_requests/{iid}/commits") or []
+        if not commits:
+            return False
+        first = commits[-1]                                  # the API lists newest first
+        email, name = (first.get("author_email") or "").lower(), first.get("author_name") or ""
+        return not ("service_account" in email or name.startswith("Vallum "))
+
     def escalated(self, mr: dict) -> bool:
         """A person's decision comes before any automatic fixing: if the Reviewer's latest verdict on this MR is
         needs-human (and no one has released it), hold the MR now, whatever its pipeline says."""
@@ -438,6 +447,13 @@ class Desk:
         target = f"{MR}-{mr['iid']}"
         tl = self.store.timeline(target)
         if tl.get("medic_sha") == mr["sha"] or tl.get("held_for"):
+            return
+        if self.member_mr(mr["iid"]):
+            # a member's own MR (Door B): Vallum never pushes fixes to it; the author decides what to change
+            self.store.set_timeline(target, medic_sha=mr["sha"])
+            self.notify.status(MR, mr["iid"], "Pipeline failed", "waiting", note=mr["sha"][:8], title=mr["title"],
+                               now="The pipeline failed. This is your merge request, so Vallum doesn't change it.",
+                               action="push a fix (the failing jobs are in the pipeline), or close the merge request.")
             return
         attempts = int(tl.get("medic_attempts", 0))
         cap = int(self.pol["releases"]["max_fix_attempts"])

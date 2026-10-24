@@ -260,6 +260,24 @@ def test_needs_human_beats_the_medic_on_a_failed_pipeline():
     assert desk.escalated(mr) is False                             # the owner removed the label: carry on
 
 
+def test_no_medic_on_a_members_own_mr():
+    """Regression (MR !10): after the owner released the hold and decided to close, the desk sent the Medic to
+    fix a member's own MR."""
+    from vallum.desk.__main__ import Desk
+
+    class GL(LabelGL):
+        def paged(self, path, **kw):
+            return [{"author_name": "Vallum Builder", "author_email": "service_account_x@noreply.gitlab.com"},
+                    {"author_name": "Ansh Varshney", "author_email": "varshney.ansh04@gmail.com"}]   # newest first
+
+    desk = Desk.__new__(Desk)
+    desk.store, desk.pol, desk.notify, desk.gl = Store(MemoryState()), policy(), FakeNotify(), GL()
+    assert desk.member_mr(10) is True
+    desk.send_medic({"iid": 10, "sha": "abc", "title": "x", "diverged_commits_count": 0})
+    assert ("merge_requests", 10, "Pipeline failed", "waiting") in desk.notify.statuses
+    assert desk.store.timeline("merge_requests-10").get("medic_attempts") is None
+
+
 def test_mr_activity_switches_listen_mode_on():
     store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
     pit = cockpit.Cockpit(CockpitGL([], access={}), store, pol, notify)
