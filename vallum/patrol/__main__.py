@@ -174,16 +174,7 @@ class Patrol:
 
     def modes(self) -> list[dict]:
         changes = allowance.update_modes(self.store, self.pol)
-        for c in changes:
-            word = {"red": "RED: changes touching it are paused (only P0/P1 fixes continue)",
-                    "yellow": "YELLOW: an extra test-drive step and a size cap",
-                    "green": "GREEN: shipping normally"}[c["to"]]
-            self.store.event("mode", f"{c['tier']} {c['from'].upper()} → {c['to'].upper()} ({round(100 * c['allowance'])}% left)")
-            self.notify.alert(ISSUES, None, f"{c['tier'].capitalize()} is now {c['to'].upper()}", author=self.owner(),
-                              what=f"The {c['tier']} mistake allowance is at {round(100 * c['allowance'])}%, so its mode "
-                                   f"changed from {c['from'].upper()} to {c['to'].upper()}.",
-                              impact=word, done="Updated the modes; the Merge Desk and the Flight Director follow them.",
-                              nxt="Modes change back by themselves as the allowance recovers.", action="No.")
+        allowance.announce(changes, self.store, self.notify, self.owner())
         return changes
 
     # ------------------------------------------------------------------ paused requests, fixes, stalls

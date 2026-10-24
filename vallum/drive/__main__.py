@@ -123,6 +123,14 @@ class Drive:
         counts = allowance.count(samples, tier_of, limits, float(self.pol.get("allowance", {}).get("slow_factor", 2.0)),
                                  warmup_s=float(self.pol["judge"]["warmup_s"]))
         allowance.record(self.store, counts, label, None, self.pol.window_minutes())
+        try:
+            # modes follow at once (a slip can turn a tier Red mid-release), not at the next Live Patrol
+            changes = allowance.update_modes(self.store, self.pol)
+            allowance.announce(changes, self.store, self.notify, self.pol.owners[0] if self.pol.owners else None)
+            if changes:
+                log("modes: " + ", ".join(f"{c['tier']} {c['from']}→{c['to']}" for c in changes))
+        except Exception as exc:
+            log(f"could not update the modes: {exc}")
         return counts
 
     def clear_labels(self, mr_iid, issue_iid):

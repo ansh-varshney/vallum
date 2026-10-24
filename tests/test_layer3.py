@@ -118,6 +118,15 @@ def test_update_modes_reports_changes_once():
     assert allowance.update_modes(store, pol) == []               # no change, no second alert
 
 
+def test_mode_changes_are_announced():
+    store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
+    allowance.record(store, {"core": {"visits": 12000, "bad": 20}}, "drive r-1 1%")
+    changes = allowance.update_modes(store, pol)
+    allowance.announce(changes, store, notify, "owner")
+    assert [a[2] for a in notify.alerts] == ["Core is now RED"]
+    assert store.doc("recent")["events"][0]["kind"] == "mode"
+
+
 def test_yellow_adds_the_extra_step():
     pol = policy()
     assert pol.steps("standard", "green") == [10, 50, 100]

@@ -120,6 +120,22 @@ def next_mode(tier: str, current: str, allowance: float, tiers_policy: dict, sta
     return "yellow" if allowance < yellow_below else "green"
 
 
+WORDS = {"red": "RED: changes touching it are paused (only P0/P1 fixes continue)",
+         "yellow": "YELLOW: an extra test-drive step and a size cap",
+         "green": "GREEN: shipping normally"}
+
+
+def announce(changes: list[dict], store, notify, owner: str | None):
+    """Tell the owner about every mode change (event + alert); used by the Live Patrol and the test drive."""
+    for c in changes:
+        store.event("mode", f"{c['tier']} {c['from'].upper()} → {c['to'].upper()} ({round(100 * c['allowance'])}% left)")
+        notify.alert("issues", None, f"{c['tier'].capitalize()} is now {c['to'].upper()}", author=owner,
+                     what=f"The {c['tier']} mistake allowance is at {round(100 * c['allowance'])}%, so its mode "
+                          f"changed from {c['from'].upper()} to {c['to'].upper()}.",
+                     impact=WORDS[c["to"]], done="Updated the modes; the Merge Desk and the Flight Director follow them.",
+                     nxt="Modes change back by themselves as the allowance recovers.", action="No.")
+
+
 def update_modes(store, pol) -> list[dict]:
     """Recompute allowances and modes in one transaction; return the mode changes."""
     targets = {t: pol.tier(t)["target"] for t in TIERS}
