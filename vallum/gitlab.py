@@ -196,8 +196,11 @@ class GitLab:
             raise
 
     # --- notes and issues --------------------------------------------------
-    def notes(self, kind: str, iid: int) -> list[dict]:
-        return self.paged(f"/projects/:id/{kind}/{iid}/notes", sort="asc", order_by="created_at")
+    def notes(self, kind: str, iid: int, limit: int = 500) -> list[dict]:
+        """The newest `limit` notes, oldest first. (Long issues such as the Ledger have hundreds of system
+        notes; asking for the oldest ones first used to cut off every new comment.)"""
+        newest = self.paged(f"/projects/:id/{kind}/{iid}/notes", limit=limit, sort="desc", order_by="created_at")
+        return list(reversed(newest))
 
     def add_note(self, kind: str, iid: int, body: str) -> dict:
         return self.post(f"/projects/:id/{kind}/{iid}/notes", json={"body": body})

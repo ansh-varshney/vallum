@@ -84,8 +84,12 @@ allowance:                       # B10: mistake allowance per tier and app-wide,
   min_allowed_bad: 10            # noise floor: a window always allows at least 10 bad visits (demo traffic is small)
 
 cockpit:
-  prefix: "@vallum"              # exact commands, carried out by code for members only (B23)
+  prefix: "@vallum"              # exact commands, carried out by code for members only (B23); the Cockpit bot's name works too
   min_access: 30                 # Developer
+  poll_s: 15                     # listen mode: how often code looks for new commands
+  listen_after_command_min: 20   # after any command, keep listening this long (commands come in bursts)
+  listen_max_min: 180            # longest `@vallum listen <minutes>`
+  job_listen_max_min: 8          # one Live Patrol job listens at most this long; the next scheduled one takes over
 
 agents:
   start_via_triggers: true       # code starts agents by member-only actions (namespace credits), API as fallback

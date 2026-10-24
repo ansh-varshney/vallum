@@ -135,6 +135,42 @@ def test_cockpit_parses_exact_commands_only():
     assert cockpit.parse_ref("#7") == ("issues", 7)
 
 
+def test_commands_accept_the_cockpit_bots_name():
+    names = ("vallum", "ai-vallum-cockpit-gitlab-ai-hackathon")
+    assert cockpit.parse("@ai-vallum-cockpit-gitlab-ai-hackathon pause", names) == [("pause", "")]
+    assert cockpit.parse("@ai-vallum-ship-gitlab-ai-hackathon pause", names) == []      # other bots are not the Cockpit
+    assert cockpit.parse("@vallum listen 120", names) == [("listen", "120")]
+
+
+def test_listen_mode_keeps_scanning_then_stops():
+    store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
+    gl = CockpitGL([cnote(1, 10, "@vallum listen 30")], access={10: 30})
+    pit = cockpit.Cockpit(gl, store, pol, notify)
+    now = {"t": 0.0}
+    scans = {"n": 0}
+    real_run = pit.run
+
+    def counting_run():
+        scans["n"] += 1
+        return real_run()
+
+    pit.run = counting_run
+    pit.listen(budget_s=60, poll_s=15, sleep=lambda s: now.__setitem__("t", now["t"] + s), clock=lambda: now["t"])
+    assert scans["n"] == 4                                        # 0 s, 15 s, 30 s, 45 s
+    assert "Listen mode:** on until" in pit.do_status("issues", 9, "", "user10")
+    pit.do_listen("issues", 9, "off", "user10")
+    scans["n"] = 0
+    pit.listen(budget_s=60, poll_s=15, sleep=lambda s: None, clock=lambda: 0.0)
+    assert scans["n"] == 1                                        # listen mode off: one scan only
+
+
+def test_a_command_is_claimed_once_even_with_two_scanners():
+    store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
+    gl = CockpitGL([cnote(1, 10, "@vallum pause")], access={10: 30})
+    a, b = cockpit.Cockpit(gl, store, pol, notify), cockpit.Cockpit(gl, store, pol, notify)
+    assert a.claim("1:pause") is True and b.claim("1:pause") is False
+
+
 def test_tighten_only_makes_limits_stricter():
     m = "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
     assert cockpit.tightened(m, "120ms") == "p95(latency, route='GET /r/{code}', popular == 1) < 120ms"
@@ -152,8 +188,8 @@ class CockpitGL:
     def recent(self, kind, since):
         return [{"iid": iid} for (k, iid) in self.items if k == kind]
 
-    def notes(self, kind, iid):
-        return self.items.get((kind, iid), [])
+    def notes(self, kind, iid, limit=500):
+        return self.items.get((kind, iid), [])[-limit:]
 
     def member_access(self, user_id):
         return self.access.get(user_id, 0)
@@ -183,6 +219,30 @@ def test_cockpit_runs_member_commands_once_and_refuses_others():
     audit = store.load_release("commands")["decisions"]
     assert [d["command"] for d in audit] == ["pause", "resume"]
     assert cockpit.Cockpit(gl, store, pol, notify).run() == []     # each comment is carried out once
+
+
+def test_cockpit_runs_a_command_added_by_an_edit_once():
+    store, pol, notify = Store(MemoryState()), policy(), FakeNotify()
+    first = cnote(1, 10, "@vallum status")
+    gl = CockpitGL([first], access={10: 30})
+    assert cockpit.Cockpit(gl, store, pol, notify).run() == ["status by user10"]
+    store.update(cockpit.DOC, lambda cur: {**cur, "last_scan": iso(utcnow() - timedelta(minutes=5))})
+    edited = {**first, "body": "@vallum status\n@vallum pause", "updated_at": iso()}
+    gl.items[("issues", 9)] = [edited]
+    assert cockpit.Cockpit(gl, store, pol, notify).run() == ["pause by user10"]   # status is not run again
+
+
+def test_notes_are_the_newest_ones_in_order():
+    calls = {}
+
+    def handler(request):
+        calls["params"] = dict(request.url.params)
+        return httpx.Response(200, json=[{"id": 3}, {"id": 2}, {"id": 1}])
+
+    gl = GitLab(project_id="1", api_url="https://gitlab.example/api/v4")
+    gl.http = httpx.Client(transport=httpx.MockTransport(handler))
+    assert [n["id"] for n in gl.notes("issues", 3)] == [1, 2, 3]
+    assert calls["params"]["sort"] == "desc"                      # regression: the Ledger had 610 notes
 
 
 def test_cockpit_ship_anyway_and_resume():

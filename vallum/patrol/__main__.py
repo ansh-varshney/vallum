@@ -332,9 +332,7 @@ class Patrol:
                                   f"{((modes.get(t) or {}).get('mode') or 'green').upper()}"
                                   for t in ("core", "standard", "experimental", "app"))
             + (f" · changed: {changes}" if changes else ""))
-        steps = (("resume", lambda: self.resume_paused(modes)), ("fixes", self.start_fixes), ("stalled", self.stalled),
-                 ("cockpit", lambda: Cockpit(self.gl, self.store, self.pol, self.notify, self.flows,
-                                             rollback=self.rollback_feature).run()))
+        steps = (("resume", lambda: self.resume_paused(modes)), ("fixes", self.start_fixes), ("stalled", self.stalled))
         for name, step in steps:
             try:
                 done = step()
@@ -342,6 +340,17 @@ class Patrol:
             except Exception as exc:
                 log(f"{name} failed: {type(exc).__name__}: {exc}")
         self.notify.ledger()
+        cfg = self.pol.get("cockpit", {})
+        cockpit = Cockpit(self.gl, self.store, self.pol, self.notify, self.flows, rollback=self.rollback_feature)
+        try:
+            done = cockpit.listen(budget_s=60 * float(cfg.get("job_listen_max_min", 8)), poll_s=float(cfg.get("poll_s", 15)))
+            until = cockpit.listening_until()
+            log("cockpit: " + (", ".join(done) if done else "nothing")
+                + (f" (listen mode until {until.strftime('%H:%M')} UTC)" if until and until > utcnow() else ""))
+            if done:
+                self.notify.ledger()
+        except Exception as exc:
+            log(f"cockpit failed: {type(exc).__name__}: {exc}")
 
 
 def main():

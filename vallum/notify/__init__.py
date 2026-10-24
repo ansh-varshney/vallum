@@ -4,6 +4,7 @@ Everything here is code filling fixed templates from the state store, so it can'
 Comments are posted with the owner token and start with "🛡 Vallum:". Notifications never
 fail a release: errors are printed and swallowed."""
 
+import hashlib
 import os
 import traceback
 
@@ -188,6 +189,12 @@ class Notifier:
                                  self.store.doc("usage"),
                                  int(self.policy.get("credits", {}).get("daily_code_started_sessions", 0)) or None,
                                  float((self.policy.get("circuit_breaker") or {}).get("within_hours", 6)))
+            # only rewrite when something changed: every rewrite adds a system note to the Ledger issue
+            content = "\n".join(ln for ln in body.splitlines() if not ln.startswith("_Updated "))
+            digest = hashlib.sha256(content.encode()).hexdigest()[:16]
+            if self.store.doc("meta").get("ledger_digest") == digest:
+                return
+            self.store.update("meta", lambda cur: {**cur, "ledger_digest": digest})
             self.gl.edit_issue(iid, description=body)
         except Exception:
             print(f"[notify] Ledger update failed:\n{traceback.format_exc()}")

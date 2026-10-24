@@ -2,27 +2,39 @@
 
 The Cockpit agent (a flow started by mentioning its bot) only explains and suggests commands; it never acts.
 Code scans recent comments, parses the exact syntax, checks the commenter's role through the members API,
-carries the command out, confirms it on the same issue or MR and records it in the audit trail."""
+carries the command out, confirms it on the same issue or MR and records it in the audit trail.
+
+Commands may start with `@vallum` or with the Cockpit bot's name (GitLab's autocomplete offers the bot when
+you type @vallum); mentioning the bot also makes the Cockpit agent acknowledge at once. After a command, code
+listens for follow-ups every few seconds for a while (listen mode), and `@vallum listen <minutes>` keeps it
+listening for a whole test or demo session."""
 
 import re
+import time
 from datetime import timedelta
 
 import yaml
 
 from vallum.checker.measure import parse_measure
-from vallum.config import iso, utcnow
+from vallum.config import iso, parse_iso, utcnow
 
-COMMANDS = ("status", "pause", "resume", "rollback", "ship-anyway", "explain", "tighten")
-_CMD = re.compile(r"(?:^|\s)@vallum\s+(" + "|".join(re.escape(c) for c in COMMANDS) + r")\b[ \t]*([^\n]*)", re.I)
+COMMANDS = ("status", "pause", "resume", "rollback", "ship-anyway", "explain", "tighten", "listen")
 _REF = re.compile(r"([!#])(\d+)")
 DOC = "cockpit"
 
 
-def parse(body: str) -> list[tuple[str, str]]:
-    """All commands in a comment: [(command, argument text)]. Text in code blocks is ignored."""
+def _pattern(names: tuple[str, ...]) -> re.Pattern:
+    who = "|".join(re.escape(n) for n in names)
+    return re.compile(r"(?:^|\s)@(?:" + who + r")\s+(" + "|".join(re.escape(c) for c in COMMANDS)
+                      + r")\b[ \t]*([^\n]*)", re.I)
+
+
+def parse(body: str, names: tuple[str, ...] = ("vallum",)) -> list[tuple[str, str]]:
+    """All commands in a comment: [(command, argument text)]. Text in code blocks is ignored. `names` are the
+    accepted prefixes: `vallum` and the Cockpit bot's username."""
     text = re.sub(r"```.*?```", "", body or "", flags=re.S)
     text = re.sub(r"`[^`\n]*`", "", text)
-    return [(m.group(1).lower(), m.group(2).strip()) for m in _CMD.finditer(text)]
+    return [(m.group(1).lower(), m.group(2).strip()) for m in _pattern(names).finditer(text)]
 
 
 def parse_ref(arg: str) -> tuple[str, int] | None:
@@ -49,6 +61,24 @@ class Cockpit:
         self.flows = flows
         self.rollback = rollback          # callable(feature, who) -> str, provided by the patrol (needs the cloud login)
 
+    def names(self) -> tuple[str, ...]:
+        bot = self.flows.registry("cockpit").get("service_account") if self.flows else None
+        return ("vallum", bot) if bot else ("vallum",)
+
+    def claim(self, key: str) -> bool:
+        """Mark one command as handled in a transaction; False if another scanner already took it."""
+        got = {"ok": False}
+
+        def fn(cur):
+            done = list(cur.get("done", []))
+            got["ok"] = key not in done
+            if got["ok"]:
+                cur["done"] = (done + [key])[-2000:]
+            return cur
+
+        self.store.update(DOC, fn)
+        return got["ok"]
+
     def run(self, lookback_minutes: float = 60) -> list[str]:
         state = self.store.doc(DOC)
         since = state.get("last_scan") or iso(utcnow() - timedelta(minutes=lookback_minutes))
@@ -56,19 +86,43 @@ class Cockpit:
         started = iso()
         handled = []
         bots = set(self.flows.bots()) if self.flows else set()
+        names = self.names()
         for kind in ("issues", "merge_requests"):
             for item in self.gl.recent(kind, since):
-                for note in self.gl.notes(kind, item["iid"]):
-                    if note.get("system") or str(note["id"]) in done or (note.get("created_at") or "") < since:
+                for note in self.gl.notes(kind, item["iid"], limit=100):
+                    changed = note.get("updated_at") or note.get("created_at") or ""
+                    if note.get("system") or parse_iso(changed) < parse_iso(since):
                         continue
                     author = note.get("author") or {}
                     if author.get("username") in bots or (note.get("body") or "").startswith("🛡 Vallum"):
                         continue
-                    for cmd, arg in parse(note.get("body", "")):
+                    # each command in a comment runs once; a comment edited to add a command runs only the new one
+                    for cmd, arg in parse(note.get("body", ""), names):
+                        key = f"{note['id']}:{cmd} {arg}".strip()
+                        if key in done or str(note["id"]) in done or not self.claim(key):
+                            continue
                         handled.append(self.execute(kind, item["iid"], note, cmd, arg))
-                    done.add(str(note["id"]))
-        self.store.update(DOC, lambda cur: {**cur, "last_scan": started, "done": sorted(done)[-1000:]})
+        self.store.update(DOC, lambda cur: {**cur, "last_scan": started})
         return handled
+
+    def listening_until(self):
+        return parse_iso(self.store.doc(DOC).get("listen_until"))
+
+    def listen(self, budget_s: float, poll_s: float = 15, sleep=time.sleep, clock=time.monotonic) -> list[str]:
+        """Scan once; then, while listen mode is on, scan again every `poll_s` seconds for up to `budget_s`."""
+        handled = self.run()
+        end = clock() + budget_s
+        while clock() + poll_s < end:
+            until = self.listening_until()
+            if not until or until <= utcnow():
+                break
+            sleep(poll_s)
+            handled += self.run()
+        return handled
+
+    def keep_listening(self, minutes: float):
+        until = iso(utcnow() + timedelta(minutes=minutes))
+        self.store.update(DOC, lambda cur: {**cur, "listen_until": max(until, cur.get("listen_until") or "")})
 
     # ------------------------------------------------------------------ execution
     def reply(self, kind, iid, text):
@@ -88,6 +142,9 @@ class Cockpit:
             result = f"could not carry out `@vallum {cmd} {arg}`: {exc}"
         self.store.event("command", f"@{who}: @vallum {cmd} {arg}".strip() + f" → {result[:120]}")
         self.audit(who, cmd, arg, kind, iid, result)
+        if not (cmd == "listen" and arg.strip().lower() == "off"):
+            # people give commands in bursts: answer the next ones within seconds
+            self.keep_listening(float(self.pol.get("cockpit", {}).get("listen_after_command_min", 20)))
         self.reply(kind, iid, f"`@vallum {cmd} {arg}`".replace(" `", "`") + f" from @{who}: {result}")
         return f"{cmd} by {who}"
 
@@ -104,9 +161,26 @@ class Cockpit:
         tiers = ", ".join(f"{t} {round(100 * (modes.get(t) or {}).get('allowance', 1))}% "
                           f"{((modes.get(t) or {}).get('mode') or 'green').upper()}" for t in ("core", "standard", "experimental", "app"))
         queue = self.store.doc("queue").get("items", [])
+        until = self.listening_until()
+        listening = f"on until {until.strftime('%H:%M')} UTC" if until and until > utcnow() else "off"
         return (f"done.\n\n**Modes:** {tiers}\n\n**Release:** {rel.get('slot', 'idle')} {rel.get('release_id') or ''} · "
-                f"**Safe mode:** {'ON (' + str(meta.get('safe_mode_reason')) + ')' if meta.get('safe_mode') else 'off'}\n\n"
+                f"**Safe mode:** {'ON (' + str(meta.get('safe_mode_reason')) + ')' if meta.get('safe_mode') else 'off'} · "
+                f"**Listen mode:** {listening}\n\n"
                 f"**Queue:** {'; '.join(queue[:5]) or 'empty'}")
+
+    def do_listen(self, kind, iid, arg, who) -> str:
+        word = (arg.split() or [""])[0].lower()
+        if word == "off":
+            self.store.update(DOC, lambda cur: {**cur, "listen_until": None})
+            return "done: listen mode is off. Commands are carried out on the next Live Patrol (within about 10 minutes)."
+        cap = float(self.pol.get("cockpit", {}).get("listen_max_min", 180))
+        try:
+            minutes = min(cap, max(1.0, float(word))) if word else 60.0
+        except ValueError:
+            return "say for how long, for example `@vallum listen 120` (minutes), or `@vallum listen off`."
+        self.store.update(DOC, lambda cur: {**cur, "listen_until": iso(utcnow() + timedelta(minutes=minutes))})
+        return (f"done: listen mode is on for {minutes:g} minutes. Commands are carried out within about "
+                f"{self.pol.get('cockpit', {}).get('poll_s', 15)} seconds while a Live Patrol is listening.")
 
     def do_pause(self, kind, iid, arg, who) -> str:
         self.store.update("meta", lambda cur: {**cur, "safe_mode": True, "safe_mode_reason": f"paused by @{who}",
