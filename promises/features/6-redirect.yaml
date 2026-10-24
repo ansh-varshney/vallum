@@ -1,0 +1,20 @@
+feature: redirect
+issue: 6
+kind: bug-fix
+tier: core
+priority: P0
+owns:
+  routes: ["GET /r/{code}"]
+  files: [app/features/redirect.py, tests/test_redirect.py]
+flag: null
+promises:
+  behavior:
+    - id: redirect-old-links-still-work
+      says: "Older links created before process start still redirect correctly"
+      steps:
+        - "POST /api/links {url: 'https://example.com/old-{rand}'} -> 201 => old_link"
+        - "GET /r/{old_link.code} -> 302 https://example.com/old-{rand}"
+        - "GET /r/{old_link.code} -> 302 https://example.com/old-{rand}"
+        - "GET /r/{old_link.code} -> 302 https://example.com/old-{rand}"
+      where: [mr, drive, live]
+      severity: blocker
