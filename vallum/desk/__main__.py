@@ -419,6 +419,42 @@ class Desk:
         self.store.event("agent", f"!{mr['iid']}: Inspector says {verdict['verdict']}", mr_iid=mr["iid"])
         return verdict
 
+    def rebase_if_main_moved(self, mr: dict, tl: dict) -> bool:
+        """A failed MR behind main: rebase it for free (no credits) once per main commit, since main may already
+        have fixed the failure (a newer checker, a fixed test). Returns True if it rebased."""
+        if not (mr.get("diverged_commits_count") or 0) > 0:
+            return False
+        try:
+            head = self.gl.get(f"/projects/:id/repository/branches/{self.pol['project'].get('default_branch', 'main')}")["commit"]["id"]
+        except Exception:
+            return False
+        if tl.get("rebased_onto") == head:
+            return False
+        self.store.set_timeline(f"{MR}-{mr['iid']}", rebased_onto=head)
+        try:
+            self.gl.put(f"/projects/:id/merge_requests/{mr['iid']}/rebase")
+        except GitLabError as exc:
+            self.log(f"!{mr['iid']}: rebase before the Medic failed: {exc}")
+            return False
+        self.notify.status(MR, mr["iid"], "Rebased on main", "done", note="before the Medic", title=mr["title"],
+                           now="The pipeline failed; main has moved, so Vallum rebased first and runs the checks again.")
+        self.log(f"!{mr['iid']}: failed but behind main: rebased instead of calling the Medic")
+        return True
+
+    def medic_gave_up(self, mr: dict, tl: dict):
+        """The Medic already looked at this commit. If it answered that a person must fix it, hold the MR."""
+        bot = (self.flows.registry("medic") or {}).get("service_account") if self.flows else None
+        if not bot:
+            return
+        notes = [n for n in self.gl.notes(MR, mr["iid"]) if (n.get("author") or {}).get("username") == bot
+                 and "Pipeline Medic" in (n.get("body") or "")]
+        if not notes or "needs a human" not in notes[-1]["body"].lower():
+            return
+        body = notes[-1]["body"]
+        cause = body.split("**Cause:**", 1)[1].split("·", 1)[0].strip() if "**Cause:**" in body else "see the Medic's note"
+        self.hold_for_human(mr, f"The Pipeline Medic could not fix the failing pipeline: {cause[:400]}",
+                            ["Fix it yourself and push", "Close the merge request"], note_id=notes[-1].get("id"))
+
     def member_mr(self, iid: int) -> bool:
         """Door B: the MR's first commit was written by a person, not by one of Vallum's agents."""
         commits = self.gl.paged(f"/projects/:id/merge_requests/{iid}/commits") or []
@@ -446,29 +482,28 @@ class Desk:
         """A Vallum MR whose pipeline failed (or whose rebase conflicted): the Medic gets at most 2 attempts (B19)."""
         target = f"{MR}-{mr['iid']}"
         tl = self.store.timeline(target)
-        if tl.get("medic_sha") == mr["sha"] or tl.get("held_for"):
+        if tl.get("held_for"):
             return
         if self.member_mr(mr["iid"]):
             # a member's own MR (Door B): Vallum never pushes fixes to it; the author decides what to change
+            if tl.get("medic_sha") == mr["sha"]:
+                return
             self.store.set_timeline(target, medic_sha=mr["sha"])
             self.notify.status(MR, mr["iid"], "Pipeline failed", "waiting", note=mr["sha"][:8], title=mr["title"],
                                now="The pipeline failed. This is your merge request, so Vallum doesn't change it.",
                                action="push a fix (the failing jobs are in the pipeline), or close the merge request.")
             return
+        if reason == "pipeline failed" and self.rebase_if_main_moved(mr, tl):
+            return
+        if tl.get("medic_sha") == mr["sha"]:
+            self.medic_gave_up(mr, tl)
+            return
         attempts = int(tl.get("medic_attempts", 0))
         cap = int(self.pol["releases"]["max_fix_attempts"])
-        if reason == "pipeline failed" and mr.get("diverged_commits_count", 0) > 0 \
-                and tl.get("rebased_failed_sha") != mr["sha"]:
-            # main may already have fixed it (a newer checker, a fixed test): rebase first, it costs no credits
-            self.store.set_timeline(target, rebased_failed_sha=mr["sha"])
-            try:
-                self.gl.put(f"/projects/:id/merge_requests/{mr['iid']}/rebase")
-                self.notify.status(MR, mr["iid"], "Rebased on main", "done", note="before the Medic", title=mr["title"],
-                                   now="The pipeline failed; main has moved, so Vallum rebased first and runs the checks again.")
-                self.log(f"!{mr['iid']}: failed but behind main: rebased instead of calling the Medic")
-                return
-            except GitLabError as exc:
-                self.log(f"!{mr['iid']}: rebase before Medic failed: {exc}")
+        fresh = self.gl.mr(mr["iid"])
+        if fresh.get("sha") != mr["sha"] or (fresh.get("head_pipeline") or {}).get("status") in ("running", "pending", "created"):
+            self.log(f"!{mr['iid']}: a new commit or pipeline arrived; not calling the Medic on the old failure")
+            return
         if attempts >= cap or not self.pol.get("gate", {}).get("agent_verdicts_required"):
             self.store.set_timeline(target, medic_sha=mr["sha"])
             self.hold_for_human(mr, f"The {reason} and the Pipeline Medic already had {attempts} attempt(s).",

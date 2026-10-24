@@ -763,3 +763,59 @@ def test_live_checks_wait_while_rolled_back_on_purpose():
     assert rolled_back_on_purpose({"promoted_revision": "rev-9"}, "rev-9") is False
     assert rolled_back_on_purpose({}, "rev-7") is False                       # before the first Layer 3 release
     assert rolled_back_on_purpose({"promoted_revision": "rev-9"}, None) is False
+
+
+class MedicGL(LabelGL):
+    def __init__(self, notes=(), main="m2"):
+        super().__init__()
+        self._notes, self.main, self.puts = list(notes), main, []
+
+    def notes(self, kind, iid, limit=500):
+        return self._notes
+
+    def get(self, path, **kw):
+        return {"commit": {"id": self.main}}
+
+    def put(self, path, json=None):
+        self.puts.append(path)
+
+    def mr(self, iid):
+        return {"sha": "abc", "head_pipeline": {"status": "failed"}}
+
+    def paged(self, path, **kw):
+        return [{"author_name": "Vallum Incident Commander", "author_email": "service_account_x@noreply.gitlab.com"}]
+
+
+def medic_desk(gl):
+    from vallum.desk.__main__ import Desk
+
+    class Flows:
+        def registry(self, key):
+            return {"service_account": "ai-vallum-pipeline-medic-gitlab-ai-hackathon"}
+
+    desk = Desk.__new__(Desk)
+    desk.store, desk.pol, desk.notify, desk.gl, desk.flows = Store(MemoryState()), policy(), FakeNotify(), gl, Flows()
+    return desk
+
+
+def test_a_failed_mr_is_rebased_again_whenever_main_moves():
+    """Regression (!12): after the Medic had seen the commit, the desk never rebased it onto main's test fix."""
+    gl = MedicGL()
+    desk = medic_desk(gl)
+    desk.store.set_timeline("merge_requests-12", medic_sha="abc", rebased_onto="m1")
+    mr = {"iid": 12, "sha": "abc", "title": "x", "diverged_commits_count": 1}
+    desk.send_medic(mr)
+    assert gl.puts == ["/projects/:id/merge_requests/12/rebase"]
+    desk.send_medic(mr)                                           # same main: no second rebase
+    assert len(gl.puts) == 1
+
+
+def test_a_medic_that_needs_a_human_holds_the_mr():
+    note = {"id": 9, "author": {"username": "ai-vallum-pipeline-medic-gitlab-ai-hackathon"},
+            "body": "🛡 Vallum: **Pipeline Medic** · attempt 1 | **Failing job:** unit-tests · **Cause:** a Vallum test · **Fix:** none: needs a human."}
+    gl = MedicGL([note])
+    desk = medic_desk(gl)
+    desk.store.set_timeline("merge_requests-12", medic_sha="abc")
+    desk.send_medic({"iid": 12, "sha": "abc", "title": "x", "diverged_commits_count": 0})
+    assert any(a[2] == "Needs a human" for a in desk.notify.alerts)
+    assert gl.mr_calls[0][1] == ["vallum::needs-human"]
