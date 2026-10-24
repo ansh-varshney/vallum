@@ -9,6 +9,8 @@ import traceback
 
 import httpx
 
+from datetime import timedelta
+
 from vallum.config import iso, utcnow
 
 PREFIX = "🛡 Vallum:"
@@ -60,14 +62,15 @@ def render_alert(event: str, author: str | None, what: str, impact: str, done: s
 
 
 def render_ledger(release: dict, meta: dict, modes: dict, queue: list, recent: list, usage: dict | None = None,
-                  cap: int | None = None) -> str:
+                  cap: int | None = None, breaker_hours: float = 6) -> str:
     rows = []
     for tier in ("core", "standard", "experimental", "app"):
         m = modes.get(tier, {})
         rows.append(f"| {tier} | {round(100 * m.get('allowance', 1.0))}% | {m.get('mode', 'green').upper()} |")
     slot = release.get("slot", "idle")
     current = f"`{release.get('release_id')}` {release.get('feature', '')} ({slot})" if slot != "idle" else "idle"
-    breaker = len(meta.get("rollbacks", []))
+    cutoff = iso(utcnow() - timedelta(hours=breaker_hours))
+    breaker = len([t for t in meta.get("rollbacks", []) if str(t) >= cutoff])
     q = "\n".join(f"{i}. {item}" for i, item in enumerate(queue, 1)) or "_empty_"
     rec = "\n".join(f"- {e.get('at', '')[:16].replace('T', ' ')} · **{e.get('kind')}** · {e.get('summary')}" for e in recent[:12]) or "_nothing yet_"
     safe = f"**ON**: {meta.get('safe_mode_reason', '')}" if meta.get("safe_mode") else "off"
@@ -183,7 +186,8 @@ class Notifier:
             body = render_ledger(self.store.release(), self.store.doc("meta"), self.store.doc("modes"),
                                  self.store.doc("queue").get("items", []), self.store.doc("recent").get("events", []),
                                  self.store.doc("usage"),
-                                 int(self.policy.get("credits", {}).get("daily_code_started_sessions", 0)) or None)
+                                 int(self.policy.get("credits", {}).get("daily_code_started_sessions", 0)) or None,
+                                 float((self.policy.get("circuit_breaker") or {}).get("within_hours", 6)))
             self.gl.edit_issue(iid, description=body)
         except Exception:
             print(f"[notify] Ledger update failed:\n{traceback.format_exc()}")

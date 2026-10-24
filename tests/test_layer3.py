@@ -54,6 +54,25 @@ def test_allowance_math():
     assert allowance.compute([old], targets, 60)["core"]["allowance"] == 1.0   # outside the window
 
 
+def test_noise_floor_keeps_one_slow_visit_from_flipping_core():
+    """Regression: overnight, 1-2 slow redirects out of ~460 per patrol flipped Core to Red six times."""
+    targets = {"core": 0.999, "standard": 0.995, "experimental": 0.99, "app": 0.995}
+    blip = [{"at": iso(), "counts": {"core": {"visits": 2760, "bad": 2}}}]
+    assert allowance.compute(blip, targets, 60)["core"]["allowance"] < 0.5                       # without a floor: Red
+    assert allowance.compute(blip, targets, 60, min_allowed_bad=10)["core"]["allowance"] == pytest.approx(0.8)
+    slip = [{"at": iso(), "counts": {"core": {"visits": 12000, "bad": 20}}}]                    # a real slip still turns it Red
+    assert allowance.compute(slip, targets, 60, min_allowed_bad=10)["core"]["allowance"] < 0.5
+    assert policy()["allowance"]["min_allowed_bad"] == 10
+
+
+def test_ledger_counts_only_recent_rollbacks():
+    from vallum.notify import render_ledger
+
+    old, new = iso(utcnow() - timedelta(hours=20)), iso(utcnow() - timedelta(minutes=5))
+    text = render_ledger({}, {"rollbacks": [old, new]}, {}, [], [], breaker_hours=6)
+    assert "**Circuit breaker:** 1 rollback(s)" in text
+
+
 def test_bad_visits_are_failures_or_very_slow():
     samples = [{"route": "GET /r/{code}", "ok": True, "ms": 50, "t": 10},
                {"route": "GET /r/{code}", "ok": True, "ms": 400, "t": 10},     # > 2 x 150 ms

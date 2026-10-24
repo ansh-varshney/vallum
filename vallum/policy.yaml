@@ -81,6 +81,7 @@ allowance:                       # B10: mistake allowance per tier and app-wide,
   standard_yellow_exit: 0.60     # hysteresis: Standard leaves Yellow above 60% (enters below 50%)
   patrol_visit_seconds: 30       # each Live Patrol run sends simulated visitors for this long
   slow_factor: 2                 # a visit slower than 2x its route's speed limit counts as a bad visit
+  min_allowed_bad: 10            # noise floor: a window always allows at least 10 bad visits (demo traffic is small)
 
 cockpit:
   prefix: "@vallum"              # exact commands, carried out by code for members only (B23)

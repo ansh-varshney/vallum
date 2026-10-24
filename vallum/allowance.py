@@ -1,7 +1,9 @@
 """Mistake allowance and modes (B10). Plain code: every visit is good or bad, allowances are computed over a
 sliding window per tier and app-wide, and modes change with separate enter and leave thresholds (hysteresis).
 
-    allowance = 1 - bad / ((1 - target) x visits)      clamped to [0, 1]
+    allowance = 1 - bad / max(min_allowed_bad, (1 - target) x visits)      clamped to [0, 1]
+    (the floor keeps a short demo window from flipping on one slow visit: simulated visitors run from CI
+    runners, and their network adds a rare slow request that no user of the app would see)
     Core:         Green -> Red below 50%, Red -> Green above 65%      (no Yellow)
     Standard:     Green -> Yellow below 50%, Yellow -> Red below 10%, Red -> Yellow above 25%, Yellow -> Green above 60%
     Experimental: always Green
@@ -69,7 +71,7 @@ def record(store, counts: dict, source: str, spend: dict | None = None, window_m
     return entry
 
 
-def compute(buckets: list[dict], targets: dict, window_minutes: float, now=None) -> dict:
+def compute(buckets: list[dict], targets: dict, window_minutes: float, now=None, min_allowed_bad: float = 0) -> dict:
     now = now or utcnow()
     cutoff = now - timedelta(minutes=window_minutes)
     total = {t: {"visits": 0, "bad": 0, "spend": 0.0} for t in (*TIERS, "app")}
@@ -87,6 +89,8 @@ def compute(buckets: list[dict], targets: dict, window_minutes: float, now=None)
     result = {}
     for t, v in total.items():
         allowed = (1 - targets.get(t, 0.995)) * v["visits"]
+        if v["visits"]:
+            allowed = max(allowed, float(min_allowed_bad))
         used = (v["bad"] / allowed) if allowed > 0 else (1.0 if v["bad"] else 0.0)
         remaining = max(0.0, min(1.0, 1.0 - used - v["spend"]))
         result[t] = {"allowance": round(remaining, 4), "visits": v["visits"], "bad": v["bad"],
@@ -122,7 +126,8 @@ def update_modes(store, pol) -> list[dict]:
     targets["app"] = float(pol.get("allowance", {}).get("app_target", 0.995))
     window = pol.window_minutes()
     exit_yellow = float(pol.get("allowance", {}).get("standard_yellow_exit", 0.60))
-    computed = compute(store.doc(DOC).get("buckets", []), targets, window)
+    floor = float(pol.get("allowance", {}).get("min_allowed_bad", 0))
+    computed = compute(store.doc(DOC).get("buckets", []), targets, window, min_allowed_bad=floor)
     changes = []
 
     def fn(cur):

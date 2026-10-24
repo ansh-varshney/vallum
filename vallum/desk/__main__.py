@@ -69,12 +69,13 @@ class Desk:
         level = priority.label_override(mr.get("labels")) or "P2"
         return priority.aged(level, mr.get("created_at"))
 
-    def save_queue(self, ready, waiting, failed, paused, held):
+    def save_queue(self, ready, waiting, failed, paused, held, refused=()):
         items = [f"!{m['iid']} {m['title']} · {self.level(m)} · ready" for m in ready]
         items += [f"!{m['iid']} {m['title']} · {self.level(m)} · paused: {why}" for m, why in paused]
         items += [f"!{m['iid']} {m['title']} · waiting for a human decision" for m in held]
         items += [f"!{m['iid']} {m['title']} · waiting for its pipeline" for m in waiting]
         items += [f"!{m['iid']} {m['title']} · pipeline failed" for m in failed]
+        items += [f"!{m['iid']} {m['title']} · refused by the Gatekeeper (waits for a new commit)" for m in refused]
         self.store.update("queue", lambda _cur: {"items": items, "at": iso()})
 
     def close_steps(self, iid: int, steps: list[str]):
@@ -514,7 +515,7 @@ class Desk:
                 self.unpause(m)
                 candidates.append(m)
         candidates.sort(key=lambda m: priority.queue_key(self.level(m), m.get("created_at")))
-        self.save_queue(candidates, waiting, failed + refused, paused, held)
+        self.save_queue(candidates, waiting, failed, paused, held, refused)
         for mr in failed:
             if mr not in held:
                 self.send_medic(mr)
