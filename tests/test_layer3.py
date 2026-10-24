@@ -162,6 +162,32 @@ def test_mode_changes_are_announced():
     assert store.doc("recent")["events"][0]["kind"] == "mode"
 
 
+def test_step_zero_collects_enough_for_app_wide_promises():
+    from vallum.drive.__main__ import step0_seconds
+
+    assert step0_seconds(12.0, {"GET /p/{code}": 10.8}, 160) == pytest.approx(160 * 1.3 / 10.8 + 2)
+    assert step0_seconds(12.0, {"GET /r/{code}": 100.0}, 160) == 12.0
+
+
+def test_a_release_judges_everything_changed_since_the_live_code():
+    """r-0007 (link preview) would have redeployed the rolled-back redirect slip while judging only the preview."""
+    from vallum.drive.__main__ import Drive
+
+    class GL:
+        def compare(self, a, b):
+            assert a == "6ad46fd"
+            return {"diffs": [{"new_path": "app/features/redirect.py"}, {"new_path": "app/features/link_preview.py"}]}
+
+    drive = Drive.__new__(Drive)
+    drive.pol, drive.gl, drive.store = policy(), GL(), Store(MemoryState())
+    from vallum import cards as cardlib
+    drive.cards = cardlib.load_from_dir(ROOT)
+    drive.store.set_release(last_good="vallum-6ad46fd-2981156911")
+    info = {"release_id": "r-7", "commit": "80b955f", "features": ["link-preview"], "touched": [], "tier": "standard"}
+    out = drive.widen(info)
+    assert "redirect" in out["touched"] and out["tier"] == "core" and out["carried"] == ["redirect"]
+
+
 def test_yellow_adds_the_extra_step():
     pol = policy()
     assert pol.steps("standard", "green") == [10, 50, 100]

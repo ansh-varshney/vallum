@@ -9,6 +9,7 @@ Every step writes a verdict report, updates the state store and tells the change
 import asyncio
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -34,6 +35,15 @@ REPORTS = Path("reports")
 
 def log(msg: str):
     print(f"[drive {utcnow().strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def step0_seconds(seconds: float, rates: dict, star_need: int, warmup_s: float = 2.0) -> float:
+    """Long enough for app-wide promises (route '*') too: r-0007 was refused with 109 of 160 samples because
+    step 0 only planned for the feature's own routes."""
+    total = sum(rates.values()) or 1.0
+    if star_need and total * max(seconds - warmup_s, 1.0) < star_need * 1.3:
+        return star_need * 1.3 / total + warmup_s
+    return seconds
 
 
 class Drive:
@@ -199,6 +209,41 @@ class Drive:
                 "feature": ", ".join(names) or "app", "tier": tier, "author": os.environ.get("GITLAB_USER_LOGIN"),
                 "title": os.environ.get("CI_COMMIT_TITLE", "owner push"), "commit": sha, "owner_push": True}
 
+    def live_commit(self, rel: dict) -> str | None:
+        """The commit that visitors are on now: recorded at promotion, or read from the revision name
+        (<service>-<sha7>-<pipeline>) for releases made before it was recorded."""
+        if rel.get("promoted_commit"):
+            return rel["promoted_commit"]
+        m = re.match(re.escape(self.pol["cloud_run"]["service"]) + r"-([0-9a-f]{7,40})-", rel.get("last_good") or "")
+        return m.group(1) if m else None
+
+    def widen(self, info: dict) -> dict:
+        """Judge everything that changed since the live code, not only this merge request: a change that was
+        rolled back stays merged in main, and the next release ships it again (seen with r-0006 → r-0007)."""
+        live = self.live_commit(self.store.release())
+        if not live:
+            return info
+        try:
+            files = [d["new_path"] for d in self.gl.compare(live, info["commit"]).get("diffs", [])]
+        except Exception as exc:
+            log(f"could not compare with the live code ({live[:8]}): {exc}")
+            return info
+        touched = set(cardlib.blast_radius(files, self.cards.cards))
+        changed = {n for n, p in self.cards.paths.items() if p in files}
+        known = set(info.get("features") or []) | set(info.get("touched") or [])
+        extra = sorted((touched | changed) - known)
+        if not extra:
+            return info
+        names = sorted(set(info.get("features") or []) | changed)
+        all_touched = sorted(set(info.get("touched") or []) | touched)
+        subjects = [self.cards.cards[n] for n in set(names) | set(all_touched) if n in self.cards.cards]
+        tier = cardlib.effective_tier(subjects, config.catalog(), set(all_touched), self.cards.cards, files,
+                                      self.pol.get("core_paths", []))
+        if cardlib.TIER_RANK.get(info.get("tier"), 0) > cardlib.TIER_RANK.get(tier, 0):
+            tier = info["tier"]
+        log(f"also judging {', '.join(extra)}: changed since the live code ({live[:8]}), tier {tier}")
+        return {**info, "features": names, "touched": all_touched, "tier": tier, "carried": extra}
+
     def no_app_change(self) -> int:
         """Merged, but nothing the app runs on changed (no image was built): free the slot."""
         rel = self.store.release()
@@ -217,7 +262,7 @@ class Drive:
         image = os.environ.get("IMAGE")
         if not image:
             return self.no_app_change()
-        info = self.identify()
+        info = self.widen(self.identify())
         rid, mr_iid, tier = info["release_id"], info.get("mr_iid"), info["tier"]
         names = sorted(set(info.get("features") or []) | set(info.get("touched") or []))
         mode = ((self.store.doc("modes").get(tier) or {}).get("mode")) or "green"
@@ -287,6 +332,7 @@ class Drive:
         else:
             rates = plan_rates(needs, 1.0, seconds, 0, max_rps, {}) or {"GET /health": 20}
             v = Visitors(cand_url, fresh, key)
+        seconds = step0_seconds(seconds, rates, needs.get("*", 0))
         asyncio.run(v.run(rates, seconds))
         warm = [s for s in v.samples if s.get("t", 0) >= 2.0]   # skip connection set-up in the first seconds
         for p in metric:
@@ -374,7 +420,8 @@ class Drive:
         rel = self.store.release()
         history = ([old_rev] if old_rev else []) + [r for r in rel.get("previous_good", []) if r != old_rev]
         self.store.set_release(slot="idle", last_good=new_rev, previous_good=history[:5], candidate=None, step=None,
-                               abort=False, released_at=iso(), release_id=rid, promoted_revision=new_rev)
+                               abort=False, released_at=iso(), release_id=rid, promoted_revision=new_rev,
+                               promoted_commit=info.get("commit"))
         self.audit(rid, {"by": "drive", "step": 100, "verdict": "promoted"}, finished_at=iso(), outcome="released",
                    revision=new_rev, previous_revision=old_rev, feature=info.get("feature"), owner_notified=bool(mr_iid))
         self.store.event("released", f"{rid} {info.get('feature')} released" + (" (first deploy)" if first else ""),
