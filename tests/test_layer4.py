@@ -170,3 +170,100 @@ def test_security_fetch_pages_and_ledger_groups_image_findings():
     decisions = [security.triage(f, ["app/"]) for f in FINDINGS + [dict(FINDINGS[3], id="gid://x/6", severity="HIGH")]]
     ledger = render_ledger({}, {}, {}, [], [], security={"decisions": decisions})
     assert ledger.count("**image**") == 1 and "2 container finding(s) in the base image (1 critical, 1 high)" in ledger
+
+
+PREVIEW = {"feature": "link-preview", "tier": "experimental", "flag": "link_preview", "owns": {"routes": ["GET /p/{code}"]}}
+REDIRECT = {"feature": "redirect", "tier": "core", "flag": None}
+
+
+class FlagsGL:
+    def __init__(self, existing):
+        self.flags = dict(existing)
+        self.posts, self.puts = [], []
+
+    def get(self, path, **params):
+        return [{"name": n, "active": a} for n, a in self.flags.items()]
+
+    def post(self, path, json=None):
+        self.posts.append(json)
+        self.flags[json["name"]] = json["active"]
+        return json
+
+    def put(self, path, json=None):
+        self.puts.append((path, json))
+        self.flags[path.rsplit("/", 1)[-1]] = json["active"]
+        return json
+
+
+def test_kill_switches_are_created_mirrored_and_flipped_only_for_non_core_features():
+    from vallum import flags
+
+    store, gl = Store(MemoryState()), FlagsGL({"version": True})
+    cards = {"link-preview": PREVIEW, "redirect": REDIRECT}
+    out = flags.sync(gl, store, cards)
+    assert out["created"] == ["link_preview"] and gl.posts[0]["active"] is True
+    assert store.doc("flags")["flags"] == {"version": True, "link_preview": True}
+    gl.flags["version"] = False                                            # a member flips it in the GitLab UI
+    assert flags.sync(gl, store, cards)["flipped"] == {"version": False}
+
+    class P:
+        def __init__(self, feature):
+            self.feature = feature
+
+    broken = [{"promise": P("redirect")}, {"promise": P("link-preview")}, {"promise": P("link-preview")}]
+    todo = flags.to_switch_off(broken, cards, store.doc("flags")["flags"])
+    assert list(todo) == ["link_preview"]                                  # Core has no switch; one flip per flag
+    flags.switch(gl, store, "link_preview", False)
+    assert gl.flags["link_preview"] is False and store.doc("flags")["flags"]["link_preview"] is False
+    assert flags.off_features(cards, store.doc("flags")["flags"]) == {"link-preview"}
+    assert flags.to_switch_off(broken, cards, store.doc("flags")["flags"]) == {}   # already off
+
+
+def test_the_app_follows_the_mirror_and_a_fix_revision_sees_its_switch_on():
+    from fastapi import FastAPI, HTTPException
+    from starlette.requests import Request
+
+    from app import flags as appflags
+
+    class S:
+        def __init__(self, doc):
+            self.doc = doc
+
+        def read_doc(self, collection, name):
+            return self.doc
+
+    def call(doc, revision):
+        appflags._cache["at"] = 0.0
+        app = FastAPI()
+        app.state.store, app.state.revision = S(doc), revision
+        try:
+            appflags.require("link_preview")(Request({"type": "http", "app": app}))
+            return 200
+        except HTTPException as exc:
+            return exc.status_code
+
+    assert call({}, "r1") == 200                                           # unknown flags are on
+    assert call({"flags": {"link_preview": False}}, "r1") == 404
+    assert call({"flags": {"link_preview": False}, "for_revision": {"link_preview": "r2"}}, "r2") == 200
+    assert call({"flags": {"link_preview": False}, "for_revision": {"link_preview": "r2"}}, "r1") == 404
+    appflags._cache["at"] = 0.0
+
+
+def test_the_drive_skips_switched_off_features_unless_the_release_changes_them():
+    from vallum import flags
+    from vallum.cards import Promise
+    from vallum.drive import __main__ as drive
+
+    store = Store(MemoryState())
+    store.update(flags.DOC, lambda cur: {"flags": {"link_preview": False}})
+    d = drive.Drive.__new__(drive.Drive)
+    d.store, d.cards = store, CardSet(cards={"link-preview": PREVIEW, "redirect": REDIRECT})
+    ps = [Promise("preview-fast", "speed", {}, "link-preview", "card"), Promise("redirect-fast", "speed", {}, "redirect", "card")]
+    kept = d.switched_off(ps, changed={"redirect"}, new_rev="rev-9")
+    assert [p.id for p in kept] == ["redirect-fast"] and d.skip_routes == {"GET /p/{code}"} and d.reenable == []
+    assert d.without_off({"GET /p/{code}": 3.0, "GET /r/{code}": 5.0}) == {"GET /r/{code}": 5.0}
+    kept = d.switched_off(ps, changed={"link-preview"}, new_rev="rev-9")
+    assert len(kept) == 2 and d.reenable == ["link_preview"] and d.skip_routes == set()
+    assert store.doc(flags.DOC)["for_revision"] == {"link_preview": "rev-9"}
+    flags.clear_for_revision(store, "rev-9")
+    assert store.doc(flags.DOC)["for_revision"] == {}

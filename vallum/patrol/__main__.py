@@ -16,7 +16,7 @@ from datetime import timedelta
 import httpx
 
 from simulate.visitors import Visitors, plan_rates
-from vallum import agents, allowance, codemap, config, evidence, gcp, public, security
+from vallum import agents, allowance, codemap, config, evidence, flags, gcp, public, security
 from vallum import cards as cardlib
 from vallum.checker import core
 from vallum.cockpit import Cockpit
@@ -107,10 +107,15 @@ class Patrol:
             log(f"serving {revision}, older than the last release {rel.get('promoted_revision')} (rolled back on "
                 "purpose): live promise checks wait for the next release")
         live_cards = self.live_cards()
+        switches = self.sync_flags(live_cards)
+        off = flags.off_features(live_cards.cards, switches)
         checked = {}
         with core.client_for(self.url, timeout=15) as client:
             for p in ([] if rolled_back else live_cards.promises(where="live")):
                 if p.style != "steps":
+                    continue
+                if p.feature in off:
+                    checked[f"{p.feature}/{p.id}"] = "switched off"
                     continue
                 out = core.run_step_promise(client, p, key, float(self.pol["judge"]["step_retry_s"]))
                 checked[f"{p.feature}/{p.id}"] = "broken" if out["verdict"] == "broken" else "kept"
@@ -118,8 +123,11 @@ class Patrol:
                     tier = tier_of_promise(p, self.cards.cards)
                     spend[tier] = spend.get(tier, 0) + cost
                     broken.append({"promise": p, "detail": out.get("detail", ""), "tier": tier})
+        killed = self.kill_switches(broken, live_cards, switches, revision)
+        broken = [b for b in broken if b["promise"].feature not in killed]   # their incident is already open
         self.publish(live_cards, checked, revision, rolled_back)
-        samples = self.visitors(key)
+        skip = {r for f in off | killed for r in ((live_cards.cards.get(f) or {}).get("owns") or {}).get("routes", [])}
+        samples = self.visitors(key, skip_routes=skip)
         tier_of, limits = allowance.route_profile(self.cards.cards)
         counts = allowance.count(samples, tier_of, limits, float(self.pol.get("allowance", {}).get("slow_factor", 2.0)),
                                  warmup_s=3)
@@ -169,7 +177,38 @@ class Patrol:
             log(f"could not read the cards of the live code ({live[:8]}): {exc}; using main's")
             return self.cards
 
-    def visitors(self, key: str | None) -> list[dict]:
+    def sync_flags(self, live_cards: cardlib.CardSet) -> dict:
+        """Kill switches (B24): create missing ones in GitLab, mirror GitLab's state for the app."""
+        try:
+            out = flags.sync(self.gl, self.store, live_cards.cards)
+        except Exception as exc:
+            log(f"feature flags: could not sync ({type(exc).__name__}: {exc}); using the last mirror")
+            return self.store.doc(flags.DOC).get("flags") or {}
+        for name in out["created"]:
+            self.store.event("flag", f"created the kill switch {name} in GitLab Feature Flags")
+        for name, active in out["flipped"].items():
+            self.store.event("flag", f"a member turned the kill switch {name} {'on' if active else 'off'} in GitLab")
+        log("feature flags: " + (", ".join(f"{n} {'on' if a else 'OFF'}" for n, a in sorted(out["flags"].items())) or "none"))
+        return out["flags"]
+
+    def kill_switches(self, broken: list[dict], live_cards: cardlib.CardSet, switches: dict, revision) -> set[str]:
+        """FR-FLAG-2: a broken live promise on a non-Core feature switches off that feature alone, at once, and
+        opens its incident; the rest of the app keeps running and nothing is redeployed."""
+        killed = set()
+        for flag, b in flags.to_switch_off(broken, live_cards.cards, switches).items():
+            p = b["promise"]
+            try:
+                flags.switch(self.gl, self.store, flag, False)
+            except Exception as exc:
+                log(f"could not switch off {flag}: {type(exc).__name__}: {exc}")
+                continue
+            killed.add(p.feature)
+            self.store.event("flag", f"switched off {flag}: {p.feature}/{p.id} broke in production")
+            log(f"kill switch: {flag} OFF ({p.feature}/{p.id} {b['detail'][:80]})")
+            self.live_incident(b, revision, {"runs": 1, "first_at": iso()}, switched_off=flag)
+        return killed
+
+    def visitors(self, key: str | None, skip_routes: set | None = None) -> list[dict]:
         codes = (self.store.b.read("vallum_sim", "links") or {}).get("codes") or []
         if not codes or not key:
             log("no persistent links yet (the first release creates them): no visitors this run")
@@ -177,6 +216,7 @@ class Patrol:
         seconds = float(self.pol.get("allowance", {}).get("patrol_visit_seconds", 30))
         sim = self.pol["simulate"]
         rates = plan_rates({}, 1.0, seconds, float(sim["base_rps"]), float(sim["max_rps"]), sim["mix"])
+        rates = {r: v for r, v in rates.items() if r not in (skip_routes or set())}   # switched-off features
         v = Visitors(self.url, codes, key)
         asyncio.run(v.run(rates, seconds))
         return v.samples
@@ -198,16 +238,24 @@ class Patrol:
         if broken:
             log("live broken: " + ", ".join(now))
 
-    def live_incident(self, b: dict, revision: str | None, entry: dict) -> int | None:
+    def live_incident(self, b: dict, revision: str | None, entry: dict, switched_off: str | None = None) -> int | None:
         p, tier = b["promise"], b["tier"]
         record = {"source": "live patrol", "promise": f"{p.feature}/{p.id}", "says": p.says, "type": p.type,
                   "detail": b["detail"], "revision": revision, "tier": tier, "seen_runs": entry["runs"],
                   "first_seen": entry["first_at"], "allowance_spent_per_run": self.pol.get("allowance", {}).get("behavior_break_cost")}
-        body = (f"🛡 Vallum: a live promise is broken in production (seen on {entry['runs']} patrols in a row).\n\n"
+        if switched_off:
+            record["switched_off"] = switched_off
+            what_now = (f"Vallum switched off the feature's kill switch `{switched_off}` at once (GitLab Feature Flags): "
+                        "only this feature is off, the rest of the app keeps running and nothing was redeployed. "
+                        "A release that changes the feature is test-driven with the switch on for its own revision, "
+                        "and turns it back on when it is promoted.")
+        else:
+            what_now = ("Nothing was rolled back automatically: the release already passed its test drive. Each patrol "
+                        "spends the tier's allowance while it stays broken; a Red tier pauses changes that touch it.")
+        seen = "just now" if switched_off else f"seen on {entry['runs']} patrols in a row"
+        body = (f"🛡 Vallum: a live promise is broken in production ({seen}).\n\n"
                 f"**Promise:** `{p.feature}/{p.id}` · {p.says}\n\n**Revision:** `{revision}` · **Tier:** {tier}\n\n"
-                "Nothing was rolled back automatically: the release already passed its test drive. Each patrol "
-                "spends the tier's allowance while it stays broken; a Red tier pauses changes that touch it.\n\n"
-                "**Incident record**\n```json\n" + json.dumps(record, indent=1) + "\n```")
+                + what_now + "\n\n**Incident record**\n```json\n" + json.dumps(record, indent=1) + "\n```")
         try:
             issue = self.gl.create_issue(f"Incident: live promise {p.id} broken", body, [self.pol.label("incident")])
         except Exception as exc:
@@ -217,7 +265,8 @@ class Patrol:
                            {"incident_iid": issue["iid"], **record}, issue_id=issue["iid"])
         self.notify.alert(ISSUES, issue["iid"], "Live promise broken", author=self.owner(),
                           what=f"`{p.feature}/{p.id}` ({p.says}) is broken in production: {b['detail']}",
-                          impact=f"Spends the {tier} allowance on every patrol while it stays broken.",
+                          impact=(f"`{switched_off}` is switched off: the feature answers 404 until a fix ships."
+                                  if switched_off else f"Spends the {tier} allowance on every patrol while it stays broken."),
                           done=f"Opened incident #{issue['iid']}" + (f" and assigned the Incident Commander ({via})." if via else "."),
                           nxt="The Incident Commander writes the postmortem, a learned promise and a fix issue; "
                               "Vallum then builds the fix by itself (Door C).",

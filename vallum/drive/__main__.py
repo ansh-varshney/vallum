@@ -17,7 +17,7 @@ from pathlib import Path
 
 from simulate.visitors import Visitors, ensure_links, plan_rates
 from vallum import cards as cardlib
-from vallum import agents, allowance, config, evidence, gcp, housekeeping, public
+from vallum import agents, allowance, config, evidence, flags, gcp, housekeeping, public
 from vallum.checker import core
 from vallum.checker.measure import parse_measure
 from vallum.config import iso, utcnow
@@ -79,6 +79,7 @@ class Drive:
         self.url = config.service_url(self.pol)
         self.cards = cardlib.load_from_dir(config.ROOT)
         self.report = {"steps": []}
+        self.skip_routes, self.reenable = set(), []
         REPORTS.mkdir(exist_ok=True)
 
     # ---------------------------------------------------------------- helpers
@@ -104,6 +105,26 @@ class Drive:
     def promises(self, names: list[str]) -> list[cardlib.Promise]:
         chosen = set(names) & set(self.cards.cards) or set(self.cards.cards)
         return self.cards.promises(where="drive", features=chosen)
+
+    def switched_off(self, promises: list[cardlib.Promise], changed: set, new_rev: str) -> list[cardlib.Promise]:
+        """Kill switches (B24). A switched-off feature this release doesn't change is not judged and gets no
+        visitors. One it changes (a fix) is judged with its switch on for the new revision only; visitors on the
+        old revision keep it off, and promotion turns it back on for everyone."""
+        switches = self.store.doc(flags.DOC).get("flags") or {}
+        wanted = flags.wanted(self.cards.cards)
+        off = flags.off_features(self.cards.cards, switches)
+        self.reenable = sorted(f for f, feature in wanted.items() if feature in off and feature in changed)
+        if self.reenable:
+            flags.enable_for_revision(self.store, self.reenable, new_rev)
+            log(f"testing {', '.join(self.reenable)} switched on for {new_rev} only (this release changes them)")
+        skipped = off - {wanted[f] for f in self.reenable}
+        if skipped:
+            log(f"switched off, not judged: {', '.join(sorted(skipped))}")
+        self.skip_routes = {r for f in skipped for r in ((self.cards.cards.get(f) or {}).get("owns") or {}).get("routes", [])}
+        return [p for p in promises if p.feature not in skipped]
+
+    def without_off(self, rates: dict) -> dict:
+        return {r: v for r, v in rates.items() if r not in self.skip_routes}
 
     def package_rows(self, packaged: list[cardlib.Promise], reports_dir: Path = Path(".")) -> list[dict]:
         """Package promises judged on the built image before any visitor: its size (reports/build.json from the
@@ -376,7 +397,8 @@ class Drive:
                        title=info.get("title"), feature=info.get("feature"), tier=tier, requester=info.get("author"),
                        started_at=iso(), human_actions=1)
         key = self.api_key()
-        promises = self.promises(names)
+        new_rev = f"{self.pol['cloud_run']['service']}-{info['commit'][:7]}-{os.environ.get('CI_PIPELINE_ID', '0')}"
+        promises = self.switched_off(self.promises(names), set(info.get("features") or []), new_rev)
         metric = [p for p in promises if p.style == "measure"]
         behave = [p for p in promises if p.style == "steps"]
 
@@ -385,7 +407,6 @@ class Drive:
         old_rev = self.store.release().get("last_good") or CloudRun.main_revision(svc)
         if old_rev and svc and old_rev not in CloudRun.serving(svc):
             old_rev = CloudRun.main_revision(svc)
-        new_rev = f"{self.pol['cloud_run']['service']}-{info['commit'][:7]}-{os.environ.get('CI_PIPELINE_ID', '0')}"
         genesis = old_rev is None
         self.status(mr_iid, "Step 0", "running", note="0% of visitors", tier=tier, release_id=rid,
                     now=f"Deploying revision {new_rev} with no traffic.")
@@ -416,7 +437,7 @@ class Drive:
         if replay:
             # a learned promise asks step 0 to replay real traffic (real links, real popularity), not only test links
             sim = self.pol["simulate"]
-            rates = plan_rates(needs, 1.0, seconds, float(sim["base_rps"]), max_rps, sim["mix"])
+            rates = self.without_off(plan_rates(needs, 1.0, seconds, float(sim["base_rps"]), max_rps, sim["mix"]))
             v = Visitors(cand_url, self.sim_codes(key) + fresh, key)
             log(f"step 0 replays real traffic for {', '.join(replay)}")
         else:
@@ -453,9 +474,9 @@ class Drive:
                                  {"revisionName": old_rev, "percent": 100 - pct}])
             self.status(mr_iid, f"{pct}%", "running", now=f"{pct}% of visitors are on the new version. Watching for {watch:.0f} s.")
             log(f"{pct}% on {new_rev}; watching {watch:.0f}s")
-            rates = plan_rates(needs, pct / 100, watch - float(self.pol["judge"]["warmup_s"]),
-                               float(self.pol["simulate"]["base_rps"]), float(self.pol["simulate"]["max_rps"]),
-                               self.pol["simulate"]["mix"])
+            rates = self.without_off(plan_rates(needs, pct / 100, watch - float(self.pol["judge"]["warmup_s"]),
+                                                float(self.pol["simulate"]["base_rps"]),
+                                                float(self.pol["simulate"]["max_rps"]), self.pol["simulate"]["mix"]))
             # at a first step under 10% a promise may not collect its sample; it is judged again at the next step
             carry = pct < 10 and pct != steps[-1]
             verdict, rows, samples, elapsed = asyncio.run(self.watch(codes, key, rates, new_rev, old_rev, metric, tier,
@@ -511,6 +532,13 @@ class Drive:
     def promote(self, info, new_rev, old_rev, first=False) -> int:
         rid, mr_iid = info["release_id"], info.get("mr_iid")
         self.confirm_live([{"revisionName": new_rev, "percent": 100, "tag": "cand"}], new_rev)
+        for flag in self.reenable:
+            try:
+                flags.switch(self.gl, self.store, flag, True)
+                self.store.event("flag", f"switched {flag} back on: {rid} shipped a change to it", release_id=rid)
+            except Exception as exc:
+                log(f"could not switch {flag} back on: {exc}")
+        flags.clear_for_revision(self.store, new_rev)
         rel = self.store.release()
         history = ([old_rev] if old_rev else []) + [r for r in rel.get("previous_good", []) if r != old_rev]
         self.store.set_release(slot="idle", last_good=new_rev, previous_good=history[:5], candidate=None, step=None,
@@ -578,6 +606,7 @@ class Drive:
             except Exception as exc:
                 log(f"could not reset traffic: {exc}")
         self.store.set_release(slot="idle", candidate=None, step=None, abort=False)
+        flags.clear_for_revision(self.store, new_rev)
         self.audit(rid, {"by": "drive", "step": 0, "verdict": "refused", "why": why}, finished_at=iso(), outcome="refused at step 0")
         self.store.event("refused", f"{rid} refused at step 0: {why[:120]}", release_id=rid)
         self.status(mr_iid, "Step 0", "failed", note="no visitor affected", now=f"Not released: {why}",
@@ -602,6 +631,7 @@ class Drive:
         tripped = self.store.record_rollback(float(self.pol["circuit_breaker"]["within_hours"]),
                                              int(self.pol["circuit_breaker"]["rollbacks"]))
         self.store.set_release(slot="idle", candidate=None, step=None, abort=False, last_good=old_rev)
+        flags.clear_for_revision(self.store, new_rev)
         w = judge.worst(rows) or {}
         reason = "the owner ran rollback-now" if verdict == "aborted" else f"{w.get('feature')}/{w.get('id')} {verdict}: {w.get('detail')}"
         self.audit(rid, {"by": "drive", "step": pct, "verdict": "rolled back", "why": reason, "seconds": round(took, 1)},

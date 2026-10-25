@@ -15,8 +15,8 @@ _cache = {"at": 0.0, "data": None}
 CACHE_SECONDS = 30
 TIERS = ("core", "standard", "experimental", "app")
 TIER_ORDER = {"core": 0, "standard": 1, "experimental": 2}
-DOCS = ("release", "modes", "recent", "queue", "meta", "public", "security")
-SHOWN_EVENTS = {"released", "rolled_back", "refused", "safe-mode", "live", "merged", "watchdog"}
+DOCS = ("release", "modes", "recent", "queue", "meta", "public", "security", "flags")
+SHOWN_EVENTS = {"released", "rolled_back", "refused", "safe-mode", "live", "merged", "watchdog", "flag"}
 
 
 def _load(store):
@@ -104,6 +104,8 @@ def _result(p: dict, judged: dict, feature: str, checked_at: str) -> tuple[str, 
     """(tone, text) for one promise: the live check first, then the last test drive, then where it is checked."""
     if p.get("live") == "broken":
         return "bad", f"broken in production (live check, {when(checked_at)})"
+    if p.get("live") == "switched off":
+        return "warn", "not checked: the feature is switched off by its kill switch"
     if p.get("live") == "kept":
         return "good", f"kept in production (live check, {when(checked_at)})"
     j = judged.get(f"{feature}/{p.get('id')}")
@@ -120,8 +122,8 @@ def _result(p: dict, judged: dict, feature: str, checked_at: str) -> tuple[str, 
     return "info", "checked when the feature changes"
 
 
-def features_html(public: dict) -> str:
-    features = public.get("features") or {}
+def features_html(public: dict, switches: dict | None = None) -> str:
+    features, switches = public.get("features") or {}, switches or {}
     if not features:
         return '<p class="muted">The Live Patrol publishes the live features after its next run.</p>'
     judged, checked_at = public.get("judged") or {}, public.get("checked_at")
@@ -137,10 +139,12 @@ def features_html(public: dict) -> str:
             f'<br><span class="small {tone}-text">{esc(text)}</span></div></li>'
             for p, (tone, text) in zip(promises, results))
         tier = f.get("tier") or "?"
-        flag = f' · switch <code>{esc(f["flag"])}</code>' if f.get("flag") else ""
+        off = bool(f.get("flag")) and switches.get(f["flag"]) is False
+        flag = (f' · kill switch <code>{esc(f["flag"])}</code> {"OFF" if off else "on"}' if f.get("flag") else "")
         routes = ", ".join(f.get("routes") or [])
         out.append(f'<details{" open" if broken else ""}><summary><b>{esc(name)}</b> '
                    f'{_pill(tier.capitalize(), "info")} {_pill(f.get("priority") or "", "info")}'
+                   f'{_pill("switched off", "warn") if off else ""}'
                    f'<span class="muted right">{esc(summary)}</span></summary>'
                    f'<p class="muted small">{esc(f.get("kind") or "")}{" · " + esc(routes) if routes else ""}{flag}</p>'
                    f'<ul class="promises">{rows}</ul></details>')
@@ -167,7 +171,7 @@ def events_html(events: list[dict], project_url: str) -> str:
     if not shown:
         return '<p class="muted">No releases yet.</p>'
     tones = {"released": "good", "merged": "info", "rolled_back": "bad", "refused": "warn", "safe-mode": "bad",
-             "live": "bad", "watchdog": "warn"}
+             "live": "bad", "watchdog": "warn", "flag": "warn"}
     rows = []
     for e in shown:
         link, incident = "", str(e.get("incident") or "")
@@ -233,7 +237,7 @@ release is test-driven on real traffic before everyone gets it. Revision <code>{
 {unreachable}{rolled}
 <section><h2>Mistake allowance</h2><div class="grid">{tiers_html(modes, public.get("window_minutes"))}</div></section>
 <section><h2>Releases</h2>{release_html(release, meta, data["queue"], public.get("breaker") or {})}</section>
-<section><h2>Features and their promises</h2>{features_html(public)}</section>
+<section><h2>Features and their promises</h2>{features_html(public, (data.get("flags") or {}).get("flags"))}</section>
 <section><h2>Security</h2>{security_html(data.get("security") or {})}</section>
 <section><h2>Recent releases, rollbacks and incidents</h2>{events_html(data["recent"].get("events", []), project_url)}</section>
 <footer>{"See " + " and ".join(links) + ". " if links else ""}This page reads only public data and refreshes every 30 seconds.</footer>

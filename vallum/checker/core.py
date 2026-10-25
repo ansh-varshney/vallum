@@ -27,6 +27,7 @@ def run_step_promise(client, promise: Promise, api_key: str | None, retry_s: flo
 
 def run_static_promise(promise: Promise, root: Path, build_report: dict | None = None) -> dict:
     spec = promise.data["static"]
+    detail = "static checks passed"
     for check, arg in spec.items():
         if check == "file_exists":
             if not (root / arg).exists():
@@ -47,9 +48,10 @@ def run_static_promise(promise: Promise, root: Path, build_report: dict | None =
             size_mb = build_report.get("image_bytes", 0) / 1e6
             if size_mb >= float(arg):
                 return {"verdict": "broken", "detail": f"image is {size_mb:.0f} MB, limit {arg} MB", "numbers": {"image_mb": size_mb}}
+            detail = f"image is {size_mb:.0f} MB (limit {arg} MB)"
         else:
             return {"verdict": "broken", "detail": f"unknown static check {check!r}"}
-    return {"verdict": "kept", "detail": "static checks passed"}
+    return {"verdict": "kept", "detail": detail}
 
 
 SEVERITY_ORDER = ["info", "unknown", "low", "medium", "high", "critical"]
