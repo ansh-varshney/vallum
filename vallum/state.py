@@ -120,10 +120,11 @@ class Store:
         import re
 
         rel = self.release()
-        if rel.get("promoted_commit"):
+        # last_good is what serves now: it moves on promotion and on every rollback
+        if rel.get("promoted_commit") and rel.get("promoted_revision") == rel.get("last_good"):
             return rel["promoted_commit"]
         m = re.match(re.escape(service) + r"-([0-9a-f]{7,40})-", rel.get("last_good") or "")
-        return m.group(1) if m else None
+        return m.group(1) if m else rel.get("promoted_commit")
 
     def claim_release(self, expect_slots: tuple, **fields) -> dict:
         def fn(cur):

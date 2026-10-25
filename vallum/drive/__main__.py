@@ -154,6 +154,46 @@ class Drive:
         except Exception as exc:
             log(f"could not clear old labels: {exc}")
 
+    def carried_requests(self, carried: list[str], rid: str) -> list[dict]:
+        """Earlier releases of the carried features that never reached visitors (refused or rolled back), with
+        their merge requests: those requests go live now, with this release."""
+        out, seen = [], set()
+        for _key, rec in self.store.b.list("vallum_releases"):
+            outcome = str(rec.get("outcome") or "")
+            mr = rec.get("mr")
+            if rec.get("release") == rid or not mr or mr in seen or not outcome.startswith(("refused", "rolled back")):
+                continue
+            if rec.get("released_in") or not any(f in str(rec.get("feature", "")) for f in carried):
+                continue
+            seen.add(mr)
+            out.append(rec)
+        return out
+
+    def release_carried(self, info: dict, rid: str, new_rev: str):
+        """Requests whose own release was refused or rolled back went live with this one: tell their owners and
+        close their issues (code, no agent). Seen live: the link preview (#8) shipped together with the fix (#6)."""
+        carried = info.get("carried") or []
+        if not carried:
+            return
+        for rec in self.carried_requests(carried, rid):
+            mr = int(rec["mr"])
+            issue = self.issue_of(mr)
+            note = (f"🛡 Vallum: **Released** · {rec.get('title')} went live with `{rid}` (revision `{new_rev}`), "
+                    f"after its own release `{rec.get('release')}` did not reach visitors ({rec.get('outcome')}). "
+                    "Its promises were judged again in this test drive.\n\n_Written by code from the release records._")
+            try:
+                if issue:
+                    self.gl.add_note("issues", issue, note)
+                    self.gl.edit_issue(issue, state_event="close",
+                                       remove_labels=",".join(self.pol.label(k) for k in ("needs_human", "paused", "blocked")))
+                self.gl.add_note(MR, mr, note)
+                rec["released_in"] = rid
+                self.store.save_release(rec.get("release"), rec)
+                self.store.event("released", f"!{mr} {rec.get('title')} went live with {rid}", release_id=rid)
+                log(f"carried request !{mr} (issue #{issue}) went live with {rid}")
+            except Exception as exc:
+                log(f"could not report the carried request !{mr}: {exc}")
+
     def housekeeping(self, info: dict):
         """Refresh the code map and drop the watch promises that expired with this release (one docs-only MR)."""
         names = set(info.get("features") or []) | set(info.get("touched") or [])
@@ -447,6 +487,7 @@ class Drive:
                 log(f"could not post the release record: {exc}")
             self.start_agent("release", kind, target, record, issue_id=issue_iid)
         self.clear_labels(mr_iid, issue_iid)
+        self.release_carried(info, rid, new_rev)
         self.status(mr_iid, "Released 100%", "done", note=new_rev,
                     now=f"Live for everyone. [Open the app]({self.url}/status).", action="nothing.")
         if mr_iid:
@@ -568,8 +609,17 @@ def rollback_now() -> int:
                                                "from": undone, "to": target, "seconds": round(took, 1), "at": iso()})
     record["human_actions"] = int(record.get("human_actions", 0)) + 1
     store.save_release(rid, record)
-    store.record_rollback(float(pol["circuit_breaker"]["within_hours"]), int(pol["circuit_breaker"]["rollbacks"]))
+    tripped = store.record_rollback(float(pol["circuit_breaker"]["within_hours"]), int(pol["circuit_breaker"]["rollbacks"]))
     store.event("rolled_back", f"rollback-now by @{who}: {undone} → {target} in {took:.1f}s", release_id=rid)
+    if tripped:
+        meta = store.doc("meta")
+        store.event("safe-mode", f"circuit breaker: {meta.get('safe_mode_reason')}")
+        notify.alert("issues", None, "Safe mode on (circuit breaker)", author=pol.owners[0] if pol.owners else None,
+                     what=f"{meta.get('safe_mode_reason')}.",
+                     impact="No new merges or releases until a member resumes.",
+                     done="Safe mode is on. Traffic stays where it is.",
+                     nxt="Find out why releases keep failing, then say `@vallum resume`.",
+                     action="Yes: say `@vallum resume` when ready.")
     mr_iid = rel.get("mr_iid")
     if mr_iid:
         notify.status(MR, int(mr_iid), "Rolled back", "rolled_back", note=f"by @{who}",

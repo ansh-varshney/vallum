@@ -62,7 +62,10 @@ def test_noise_floor_keeps_one_slow_visit_from_flipping_core():
     assert allowance.compute(blip, targets, 60, min_allowed_bad=10)["core"]["allowance"] == pytest.approx(0.8)
     slip = [{"at": iso(), "counts": {"core": {"visits": 12000, "bad": 20}}}]                    # a real slip still turns it Red
     assert allowance.compute(slip, targets, 60, min_allowed_bad=10)["core"]["allowance"] < 0.5
-    assert policy()["allowance"]["min_allowed_bad"] == 10
+    assert policy()["allowance"]["min_allowed_bad"] == 20
+    six_blips = [{"at": iso(), "counts": {"core": {"visits": 2760, "bad": 6}}}]                # seen overnight on 24 Oct
+    assert allowance.compute(six_blips, targets, 60, min_allowed_bad=20)["core"]["allowance"] == pytest.approx(0.7)
+    assert allowance.compute(slip, targets, 60, min_allowed_bad=20)["core"]["allowance"] < 0.5
 
 
 def test_ledger_counts_only_recent_rollbacks():
@@ -186,6 +189,35 @@ def test_a_release_judges_everything_changed_since_the_live_code():
     info = {"release_id": "r-7", "commit": "80b955f", "features": ["link-preview"], "touched": [], "tier": "standard"}
     out = drive.widen(info)
     assert "redirect" in out["touched"] and out["tier"] == "core" and out["carried"] == ["redirect"]
+
+
+def test_carried_requests_are_reported_and_closed():
+    """The preview (!14, issue #8) was refused at step 0 and later went live with the fix: tell its owner."""
+    from vallum.drive.__main__ import Drive
+
+    class GL:
+        def __init__(self):
+            self.notes, self.edits = [], []
+
+        def add_note(self, kind, iid, body):
+            self.notes.append((kind, iid))
+
+        def edit_issue(self, iid, **kw):
+            self.edits.append((iid, kw.get("state_event")))
+
+        def mr(self, iid):
+            return {"description": "Related to #8"}
+
+    drive = Drive.__new__(Drive)
+    drive.pol, drive.gl, drive.store = policy(), GL(), Store(MemoryState())
+    drive.store.save_release("r-0007", {"release": "r-0007", "mr": 14, "title": "Link preview page",
+                                        "feature": "link-preview", "outcome": "refused at step 0"})
+    drive.store.save_release("r-0006", {"release": "r-0006", "feature": "redirect", "outcome": "rolled back"})
+    drive.release_carried({"carried": ["link-preview", "redirect"]}, "r-0009", "vallum-x-1")
+    assert ("issues", 8) in drive.gl.notes and (8, "close") in drive.gl.edits
+    assert drive.store.load_release("r-0007")["released_in"] == "r-0009"
+    drive.release_carried({"carried": ["link-preview"]}, "r-0010", "vallum-y-1")
+    assert len(drive.gl.edits) == 1                                # reported once
 
 
 def test_yellow_adds_the_extra_step():
@@ -853,8 +885,10 @@ def test_live_promises_come_from_the_live_code():
     store = Store(MemoryState())
     store.set_release(last_good="vallum-6ad46fd-2981156911")
     assert store.live_commit("vallum") == "6ad46fd"
-    store.set_release(promoted_commit="80b955fcd46f")
+    store.set_release(promoted_commit="80b955fcd46f", promoted_revision="vallum-80b955f-1", last_good="vallum-80b955f-1")
     assert store.live_commit("vallum") == "80b955fcd46f"
+    store.set_release(last_good="vallum-8fd2d63-2977660369")       # rolled back on purpose since
+    assert store.live_commit("vallum") == "8fd2d63"
 
 
 FIX_CARD = """feature: redirect
