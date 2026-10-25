@@ -63,7 +63,7 @@ def render_alert(event: str, author: str | None, what: str, impact: str, done: s
 
 
 def render_ledger(release: dict, meta: dict, modes: dict, queue: list, recent: list, usage: dict | None = None,
-                  cap: int | None = None, breaker_hours: float = 6) -> str:
+                  cap: int | None = None, breaker_hours: float = 6, security: dict | None = None) -> str:
     rows = []
     for tier in ("core", "standard", "experimental", "app"):
         m = modes.get(tier, {})
@@ -95,7 +95,25 @@ _Updated {iso()[:16].replace('T', ' ')} UTC_
 
 ### Recent
 {rec}
-"""
+{security_section(security)}"""
+
+
+def security_section(security: dict | None) -> str:
+    decisions = (security or {}).get("decisions") or []
+    if not decisions:
+        return ""
+    image = [d for d in decisions if d.get("decision") == "image"]
+    lines = [f"- **{d.get('decision')}** · {d.get('severity')} · {d.get('title')} · `{d.get('where')}`"
+             + (f" · fix #{d['issue']}" if d.get("issue") else "") + f" · {d.get('reason')}"
+             for d in decisions if d.get("decision") != "image"][:15]
+    if image:
+        sev = {}
+        for d in image:
+            sev[d.get("severity")] = sev.get(d.get("severity"), 0) + 1
+        lines.append(f"- **image** · {len(image)} container finding(s) in the base image ("
+                     + ", ".join(f"{n} {s}" for s, n in sorted(sev.items())) + ") · " + image[0].get("reason", ""))
+    return ("\n### Security findings on main (triaged by code)\n" + "\n".join(lines)
+            + "\n\n_At Developer role Vallum cannot change a finding's status; a Maintainer applies these decisions._\n")
 
 
 class Notifier:
@@ -188,7 +206,8 @@ class Notifier:
                                  self.store.doc("queue").get("items", []), self.store.doc("recent").get("events", []),
                                  self.store.doc("usage"),
                                  int(self.policy.get("credits", {}).get("daily_code_started_sessions", 0)) or None,
-                                 float((self.policy.get("circuit_breaker") or {}).get("within_hours", 6)))
+                                 float((self.policy.get("circuit_breaker") or {}).get("within_hours", 6)),
+                                 self.store.doc("security"))
             # only rewrite when something changed: every rewrite adds a system note to the Ledger issue
             content = "\n".join(ln for ln in body.splitlines() if not ln.startswith("_Updated "))
             digest = hashlib.sha256(content.encode()).hexdigest()[:16]

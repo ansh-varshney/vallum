@@ -7,6 +7,7 @@ language: python
 framework: fastapi
 
 source_dirs: [app]
+shipped: [app]                         # what the app image contains (Dockerfile COPY); the security triage uses it
 test_dirs: [tests]
 feature:
   dir: app/features                    # one module per feature, discovered automatically

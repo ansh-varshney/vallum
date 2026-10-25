@@ -162,7 +162,9 @@ build-image:
     - echo "$CI_JOB_TOKEN" | docker login -u gitlab-ci-token --password-stdin "$CI_REGISTRY"
     - docker tag "$TAG" "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
     - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" > /dev/null
-    - DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$TAG")
+    # the Artifact Registry digest by name: with two registries the order of RepoDigests is not ours (r-0019)
+    - DIGEST=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' "$TAG" | grep "^${GCP_REGION}-docker.pkg.dev/" | head -1)
+    - test -n "$DIGEST"
     - SIZE=$(docker image inspect "$TAG" --format='{{.Size}}')
     - mkdir -p reports
     - echo "IMAGE=$DIGEST" > reports/build.env

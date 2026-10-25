@@ -110,3 +110,63 @@ def test_step_0_judges_the_image_size_and_scan(tmp_path, monkeypatch):
     assert rows["app-image-small"]["verdict"] == "kept"
     assert rows["app-image-tiny"]["verdict"] == "broken" and "189 MB" in rows["app-image-tiny"]["detail"]
     assert rows["img"]["verdict"] == "skipped"                             # no scan report in this pipeline
+
+
+FINDINGS = [
+    {"id": "gid://gitlab/Vulnerability/1", "title": "Weak PRNG", "severity": "LOW", "reportType": "SAST",
+     "resolvedOnDefaultBranch": True, "location": {"file": "app/features/redirect.py", "startLine": "29"}},
+    {"id": "gid://gitlab/Vulnerability/2", "title": "Weak PRNG", "severity": "LOW", "reportType": "SAST",
+     "resolvedOnDefaultBranch": False, "location": {"file": "simulate/visitors.py", "startLine": "82"}},
+    {"id": "gid://gitlab/Vulnerability/3", "title": "SQL injection", "severity": "HIGH", "reportType": "SAST",
+     "resolvedOnDefaultBranch": False, "location": {"file": "app/features/links.py", "startLine": "40"}},
+    {"id": "gid://gitlab/Vulnerability/4", "title": "CVE-2026-1 in libssl3", "severity": "CRITICAL",
+     "reportType": "CONTAINER_SCANNING", "resolvedOnDefaultBranch": False, "location": {"image": "registry/app:abc"}},
+    {"id": "gid://gitlab/Vulnerability/5", "title": "Open redirect", "severity": "MEDIUM", "reportType": "SAST",
+     "resolvedOnDefaultBranch": False, "location": {"file": "app/features/redirect.py", "startLine": "12"}},
+]
+
+
+def test_security_triage_decides_every_finding_and_opens_one_fix_issue_per_real_one():
+    from vallum import security
+    from vallum.notify import render_ledger
+
+    class GL:
+        def graphql(self, query, variables=None):
+            return {"project": {"vulnerabilities": {"nodes": FINDINGS}}}
+
+    store, opened = Store(MemoryState()), []
+    profile = {"source_dirs": ["app"], "shipped": ["app"]}
+    out = security.run(GL(), store, None, profile, "g/p", open_issue=lambda d: opened.append(d["id"]) or 77)
+    by_id = {d["id"]: d for d in store.doc("security")["decisions"]}
+    assert [by_id[i]["decision"] for i in "12345"] == ["fixed on main", "not shipped", "real", "image", "accepted"]
+    assert by_id["2"]["where"] == "simulate/visitors.py:82" and "not in the app image" in by_id["2"]["reason"]
+    assert opened == ["3"] and by_id["3"]["issue"] == 77 and out == ["fix issue #77 for finding 3"]
+    security.run(GL(), store, None, profile, "g/p", open_issue=lambda d: opened.append(d["id"]) or 78)
+    assert opened == ["3"]                                                 # never twice for the same finding
+    sec = store.doc("security")
+    assert sec["open"] == 5 and sec["counts"]["real"] == 1
+    ledger = render_ledger({}, {}, {}, [], [], security=sec)
+    assert "Security findings on main (triaged by code)" in ledger and "fix #77" in ledger
+    page = status.security_html(sec)
+    assert "5 open findings" in page and "1 real" in page and "simulate/visitors.py" not in page   # counts only
+    assert "triages scanner findings on its next run" in status.security_html({})
+
+
+def test_security_fetch_pages_and_ledger_groups_image_findings():
+    from vallum import security
+    from vallum.notify import render_ledger
+
+    pages = [{"project": {"vulnerabilities": {"nodes": FINDINGS[:2], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}}}},
+             {"project": {"vulnerabilities": {"nodes": FINDINGS[2:] + [dict(FINDINGS[3], id="gid://x/6", severity="HIGH")],
+                                              "pageInfo": {"hasNextPage": False}}}}]
+    seen = []
+
+    class GL:
+        def graphql(self, query, variables=None):
+            seen.append(variables.get("after"))
+            return pages[len(seen) - 1]
+
+    assert len(security.fetch(GL(), "g/p")) == 6 and seen == [None, "c1"]
+    decisions = [security.triage(f, ["app/"]) for f in FINDINGS + [dict(FINDINGS[3], id="gid://x/6", severity="HIGH")]]
+    ledger = render_ledger({}, {}, {}, [], [], security={"decisions": decisions})
+    assert ledger.count("**image**") == 1 and "2 container finding(s) in the base image (1 critical, 1 high)" in ledger

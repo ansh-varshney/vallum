@@ -15,7 +15,7 @@ _cache = {"at": 0.0, "data": None}
 CACHE_SECONDS = 30
 TIERS = ("core", "standard", "experimental", "app")
 TIER_ORDER = {"core": 0, "standard": 1, "experimental": 2}
-DOCS = ("release", "modes", "recent", "queue", "meta", "public")
+DOCS = ("release", "modes", "recent", "queue", "meta", "public", "security")
 SHOWN_EVENTS = {"released", "rolled_back", "refused", "safe-mode", "live", "merged", "watchdog"}
 
 
@@ -147,6 +147,21 @@ def features_html(public: dict) -> str:
     return "".join(out)
 
 
+def security_html(sec: dict) -> str:
+    """Counts only: finding details stay in the project's vulnerability report and the Ledger."""
+    if not sec.get("at"):
+        return '<p class="muted">The Live Patrol triages scanner findings on its next run.</p>'
+    counts, total = sec.get("counts") or {}, int(sec.get("open", 0))
+    if not total:
+        return f'<p>No open scanner findings on main. Checked {esc(when(sec["at"]))}.</p>'
+    order = (("real", "bad"), ("accepted", "warn"), ("image", "info"), ("not shipped", "info"), ("fixed on main", "good"))
+    chips = "".join(_pill(f"{counts[k]} {k}", tone) for k, tone in order if counts.get(k))
+    return (f'<p>{total} open finding{"s" if total != 1 else ""} from SAST, secret detection and container scanning, '
+            f'each with a decision made by code ({esc(when(sec["at"]))}).</p><div class="chips">{chips}</div>'
+            '<p class="muted small">Real high or critical findings in shipped code become fix issues that Vallum builds; '
+            'new ones block merges.</p>')
+
+
 def events_html(events: list[dict], project_url: str) -> str:
     shown = [e for e in events if e.get("kind") in SHOWN_EVENTS][:12]
     if not shown:
@@ -219,6 +234,7 @@ release is test-driven on real traffic before everyone gets it. Revision <code>{
 <section><h2>Mistake allowance</h2><div class="grid">{tiers_html(modes, public.get("window_minutes"))}</div></section>
 <section><h2>Releases</h2>{release_html(release, meta, data["queue"], public.get("breaker") or {})}</section>
 <section><h2>Features and their promises</h2>{features_html(public)}</section>
+<section><h2>Security</h2>{security_html(data.get("security") or {})}</section>
 <section><h2>Recent releases, rollbacks and incidents</h2>{events_html(data["recent"].get("events", []), project_url)}</section>
 <footer>{"See " + " and ".join(links) + ". " if links else ""}This page reads only public data and refreshes every 30 seconds.</footer>
 </main></body></html>"""

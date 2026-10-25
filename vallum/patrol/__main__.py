@@ -16,7 +16,7 @@ from datetime import timedelta
 import httpx
 
 from simulate.visitors import Visitors, plan_rates
-from vallum import agents, allowance, config, evidence, gcp, public
+from vallum import agents, allowance, codemap, config, evidence, gcp, public, security
 from vallum import cards as cardlib
 from vallum.checker import core
 from vallum.cockpit import Cockpit
@@ -126,6 +126,22 @@ class Patrol:
         allowance.record(self.store, counts, "patrol", spend, self.pol.window_minutes())
         log(f"visitors: {len(samples)} visits; bad: " + ", ".join(f"{t} {c['bad']}/{c['visits']}" for t, c in counts.items()))
         self.report_broken(broken, revision)
+
+    def security(self) -> list[str]:
+        """Secure stage: a decision for every open scanner finding on main (vallum/security.py)."""
+        path = os.environ.get("CI_PROJECT_PATH") or self.pol["project"].get("path", "")
+
+        def open_issue(d: dict) -> int:
+            body = (f"🛡 Vallum: the security triage found a **{d['severity']}** finding in code that ships in the app "
+                    f"image.\n\n**Finding:** {d['title']} at `{d['where']}` ({d['report']})\n\n**Why it is real:** "
+                    f"{d['reason']}\n\nDone when:\n- The finding is no longer detected on main.\n- Every promise of the "
+                    "touched feature is kept.")
+            issue = self.gl.create_issue(f"Security: {d['title']} in {d['where']}"[:250], body,
+                                         [self.pol.label("opt_in"), self.pol.label("fix"), "priority::P1"])
+            self.store.event("security", f"fix issue #{issue['iid']}: {d['severity']} {d['title'][:60]} in {d['where']}")
+            return issue["iid"]
+
+        return security.run(self.gl, self.store, self.pol, codemap.load_profile(config.ROOT), path, open_issue)
 
     def publish(self, live_cards: cardlib.CardSet, checked: dict, revision: str | None, rolled_back: bool):
         """The status page's summary (B27): the live code's promises and what this run found."""
@@ -362,7 +378,8 @@ class Patrol:
                                   f"{((modes.get(t) or {}).get('mode') or 'green').upper()}"
                                   for t in ("core", "standard", "experimental", "app"))
             + (f" · changed: {changes}" if changes else ""))
-        steps = (("resume", lambda: self.resume_paused(modes)), ("fixes", self.start_fixes), ("stalled", self.stalled))
+        steps = (("resume", lambda: self.resume_paused(modes)), ("security", self.security), ("fixes", self.start_fixes),
+                 ("stalled", self.stalled))
         for name, step in steps:
             try:
                 done = step()
