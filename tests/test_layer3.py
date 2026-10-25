@@ -985,3 +985,23 @@ def test_an_old_non_approving_verdict_asks_for_a_fresh_review():
           "detailed_merge_status": "mergeable"}
     assert desk.agent_verdicts(mr) is None
     assert started == [("review", "review")]
+
+
+def test_an_old_inspector_session_is_never_read_as_current():
+    """Regression (!13): after the request changed, the desk re-read the previous Inspector session."""
+    from vallum.desk.__main__ import Desk
+
+    class GL(LabelGL):
+        def get(self, path, **kw):
+            return {"description": "the corrected request"}
+
+    class Flows:
+        def registry(self, key):
+            return {"definition_sha": "new-instructions"}
+
+    desk = Desk.__new__(Desk)
+    desk.store, desk.pol, desk.notify, desk.gl, desk.flows = Store(MemoryState()), policy(), FakeNotify(), GL(), Flows()
+    mr = {"iid": 13, "sha": "s1", "description": "Related to #6"}
+    desk.store.set_timeline("merge_requests-13", sessions={"inspector": {"id": 1, "fp": "f", "sha": "s0"}},
+                            inspector_verdict={"verdict": "gaps", "fingerprint": "f", "request_key": "old"})
+    assert desk.inspector_verdict(mr, "f") is None              # neither the old verdict nor the old session counts
