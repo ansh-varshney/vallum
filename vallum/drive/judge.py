@@ -46,13 +46,15 @@ def judge_promise(p: Promise, samples: list[dict], new_rev: str, old_rev: str | 
     return row
 
 
-def overall(rows: list[dict], tier: str, elapsed: float, watch: float, final: bool) -> str:
+def overall(rows: list[dict], tier: str, elapsed: float, watch: float, final: bool, carry: bool = False) -> str:
     blocking = [r for r in rows if blocks(r["severity"], tier)]
     if any(r["verdict"] == BROKEN for r in blocking):
         return BROKEN
     if any(r["verdict"] == AT_RISK for r in blocking):
         return AT_RISK
     if any(r["verdict"] == COLLECTING for r in blocking):
+        if carry and final:
+            return KEPT          # not enough visits at this small step: the next step judges it
         if elapsed >= 2 * watch:
             return AT_RISK
         return COLLECTING

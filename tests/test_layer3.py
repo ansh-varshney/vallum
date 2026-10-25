@@ -267,6 +267,45 @@ def test_a_job_running_older_code_stands_down(monkeypatch):
     assert config.running_stale_code(GL("bbb")) is None             # outside CI: always act
 
 
+def test_a_small_first_step_carries_a_promise_still_collecting():
+    """r-0011: at 1% a popular-only promise had 90 of 100 visits after 4 minutes and the release was rolled back."""
+    from vallum.drive import judge
+
+    rows = [{"verdict": judge.COLLECTING, "severity": "blocker"}]
+    assert judge.overall(rows, "core", 120, 120, final=True, carry=True) == judge.KEPT
+    assert judge.overall(rows, "core", 120, 120, final=True) == judge.COLLECTING
+    assert judge.overall(rows, "core", 240, 120, final=True) == judge.AT_RISK
+    assert judge.overall([{"verdict": judge.BROKEN, "severity": "blocker"}], "core", 120, 120, True, carry=True) == judge.BROKEN
+
+
+def test_watchdog_recovers_a_crashed_drive_at_once():
+    from vallum.patrol.watchdog import decide
+
+    rel = {"slot": "driving", "deadline": iso(utcnow() + timedelta(minutes=30))}
+    assert decide(rel) is None
+    assert decide(rel, drive_ended=True) == "rollback"
+
+
+def test_watchdog_reads_the_slot_again_before_calling_a_drive_dead():
+    """A drive that promoted frees the slot just before its job ends; that must not look like a crash."""
+    from vallum.patrol.watchdog import Watchdog
+
+    class GL:
+        def get(self, path, **kw):
+            return [{"name": "build-image", "status": "success"}, {"name": "test-drive", "status": "success"}]
+
+    class St:
+        def __init__(self, slot):
+            self.slot = slot
+
+        def release(self):
+            return {"slot": self.slot, "release_id": "r-1", "drive_pipeline": 7}
+
+    held = {"slot": "driving", "release_id": "r-1", "drive_pipeline": 7}
+    assert Watchdog(GL(), St("driving"), None, None, None).drive_ended(held) == "success"
+    assert Watchdog(GL(), St("idle"), None, None, None).drive_ended(held) is None
+
+
 def test_yellow_adds_the_extra_step():
     pol = policy()
     assert pol.steps("standard", "green") == [10, 50, 100]

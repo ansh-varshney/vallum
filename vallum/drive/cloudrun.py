@@ -84,13 +84,19 @@ class CloudRun:
         self._put(body)
         return self.wait_ready()
 
-    def set_traffic(self, traffic: list[dict], timeout: float = 120) -> dict:
-        """Change the split and wait until Cloud Run reports that split as serving (status.traffic). Waiting for
-        the whole service to be Ready instead took up to two minutes after the routing had already changed."""
+    def set_traffic(self, traffic: list[dict], confirm_s: float = 0) -> dict:
+        """Change the split. Cloud Run applies it within seconds but reports it (status.traffic, Ready) only after
+        one to several minutes; waiting for the report made r-0011's rollback crash. Every visit names the revision
+        that served it, so judging doesn't need the report; a rollback measures the switch on the live app."""
         svc = self.get()
         svc["spec"]["traffic"] = traffic
-        self._put(svc)
-        return self.wait_traffic(expected_split(traffic), timeout=timeout)
+        out = self._put(svc)
+        if confirm_s:
+            try:
+                return self.wait_traffic(expected_split(traffic), timeout=confirm_s)
+            except DeployFailed:
+                return self.get() or out
+        return out
 
     def wait_traffic(self, expected: dict, timeout: float = 120, poll_s: float = 1.0) -> dict:
         deadline = time.monotonic() + timeout

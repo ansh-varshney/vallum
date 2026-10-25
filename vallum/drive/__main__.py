@@ -132,6 +132,23 @@ class Drive:
             log(f"started {key} flow ({via}) on {kind}/{iid}")
         return via
 
+    def wait_serving(self, revision: str, streak: int = 15, timeout: float = 90) -> bool:
+        """The rollback is done when visitors get the old revision: 15 answers in a row from it."""
+        import httpx
+
+        end, seen = time.monotonic() + timeout, 0
+        while time.monotonic() < end:
+            try:
+                rev = httpx.get(self.url + "/health", timeout=5).headers.get("x-revision")
+            except Exception:
+                rev = None
+            seen = seen + 1 if rev == revision else 0
+            if seen >= streak:
+                return True
+            time.sleep(0.3)
+        log(f"could not confirm {revision} serves every visitor within {timeout:.0f}s")
+        return False
+
     def spend(self, samples: list[dict], label: str, new_rev: str | None = None):
         """Every simulated visit during a traffic step is a visit; the bad ones the new revision served spend
         the mistake allowance."""
@@ -403,7 +420,10 @@ class Drive:
             rates = plan_rates(needs, pct / 100, watch - float(self.pol["judge"]["warmup_s"]),
                                float(self.pol["simulate"]["base_rps"]), float(self.pol["simulate"]["max_rps"]),
                                self.pol["simulate"]["mix"])
-            verdict, rows, samples, elapsed = asyncio.run(self.watch(codes, key, rates, new_rev, old_rev, metric, tier, watch))
+            # at a first step under 10% a promise may not collect its sample; it is judged again at the next step
+            carry = pct < 10 and pct != steps[-1]
+            verdict, rows, samples, elapsed = asyncio.run(self.watch(codes, key, rates, new_rev, old_rev, metric, tier,
+                                                                     watch, carry))
             per_rev = {}
             for s in samples:
                 per_rev.setdefault(s.get("revision") or "none", 0)
@@ -420,7 +440,7 @@ class Drive:
             self.store.event("step", f"{rid} {pct}% kept", release_id=rid)
         return self.promote(info, new_rev, old_rev)
 
-    async def watch(self, codes, key, rates, new_rev, old_rev, metric, tier, watch):
+    async def watch(self, codes, key, rates, new_rev, old_rev, metric, tier, watch, carry=False):
         v = Visitors(self.url, codes, key)
         stop = asyncio.Event()
         runner = asyncio.create_task(v.run(rates, 2 * watch + 5, stop))
@@ -439,7 +459,7 @@ class Drive:
                                         worse=float(self.pol["judge"]["worse_than_old"]),
                                         margin=float(self.pol["judge"]["at_risk_margin"]), final=final,
                                         warmup_s=float(self.pol["judge"]["warmup_s"])) for p in metric]
-            verdict = judge.overall(rows, tier, elapsed, watch, final)
+            verdict = judge.overall(rows, tier, elapsed, watch, final, carry=carry)
             w = judge.worst(rows)
             log(f"  {elapsed:5.0f}s {verdict:10} visits={len(v.samples)}"
                 + (f" worst={w['id']}: {w['detail']}" if w else ""))
@@ -535,6 +555,7 @@ class Drive:
         t0 = time.monotonic()
         if verdict != "aborted":
             self.cr.set_traffic([{"revisionName": old_rev, "percent": 100}, {"revisionName": new_rev, "percent": 0, "tag": "cand"}])
+            self.wait_serving(old_rev)
         took = time.monotonic() - t0
         tripped = self.store.record_rollback(float(self.pol["circuit_breaker"]["within_hours"]),
                                              int(self.pol["circuit_breaker"]["rollbacks"]))
@@ -544,7 +565,10 @@ class Drive:
         self.audit(rid, {"by": "drive", "step": pct, "verdict": "rolled back", "why": reason, "seconds": round(took, 1)},
                    finished_at=iso(), outcome="rolled back")
         incident = None
-        if verdict != "aborted":
+        data_only = verdict == judge.AT_RISK and (w.get("verdict") == judge.COLLECTING)
+        if data_only:
+            log("rolled back for lack of data, not a broken promise: no incident")
+        if verdict != "aborted" and not data_only:
             try:
                 broken = [r for r in rows if r.get("verdict") in (judge.BROKEN, judge.AT_RISK)][:5]
                 record = {"release_id": rid, "step_percent": pct, "verdict": verdict, "broken_promises": broken,

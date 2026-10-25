@@ -11,10 +11,13 @@ silent past its deadline, it applies that state's known undo. Production is neve
 from vallum.config import iso, parse_iso, utcnow
 
 
-def decide(release: dict, now=None) -> str | None:
-    """Pure decision so it can be unit-tested: which undo applies to the release slot, if any."""
+def decide(release: dict, now=None, drive_ended: bool = False) -> str | None:
+    """Pure decision so it can be unit-tested: which undo applies to the release slot, if any. A test drive whose
+    job already ended while the slot still says 'driving' (it crashed) is recovered at once, not at the deadline."""
     now = now or utcnow()
     slot = release.get("slot", "idle")
+    if slot == "driving" and drive_ended:
+        return "rollback"
     deadline = parse_iso(release.get("deadline"))
     if slot == "idle" or not deadline or now <= deadline:
         return None
@@ -46,13 +49,34 @@ class Watchdog:
     def run(self) -> list[str]:
         actions = []
         release = self.store.release()
-        action = decide(release)
+        ended = self.drive_ended(release)
+        if ended:
+            release = {**release, "drive_job": ended}
+        action = decide(release, drive_ended=bool(ended))
         if action:
             actions.append(getattr(self, action)(release))
         for key, lease in self.store.b.list("vallum_leases"):
             if decide_lease(lease) == "stall":
                 actions.append(self.stall(key, lease))
         return actions
+
+    def drive_ended(self, release: dict) -> str | None:
+        """The status of the test-drive job holding the slot, if that job has already ended."""
+        pipeline = release.get("drive_pipeline")
+        if release.get("slot") != "driving" or not pipeline:
+            return None
+        try:
+            jobs = self.gl.get(f"/projects/:id/pipelines/{pipeline}/jobs", per_page=100) or []
+        except Exception:
+            return None
+        job = next((j for j in jobs if j.get("name") == "test-drive"), None)
+        if not job or job.get("status") not in ("success", "failed", "canceled"):
+            return None
+        # a drive that finished normally freed the slot just before its job ended: read the slot again
+        now = self.store.release()
+        if now.get("slot") != "driving" or now.get("release_id") != release.get("release_id"):
+            return None
+        return job["status"]
 
     def free_slot(self, release: dict) -> str:
         rid = release.get("release_id")
@@ -84,13 +108,17 @@ class Watchdog:
             cr.set_traffic([{"revisionName": old, "percent": 100}])
         self.store.set_release(slot="idle", candidate=None, step=None, abort=False, last_good=old)
         self.store.record_rollback(float(self.pol["circuit_breaker"]["within_hours"]), int(self.pol["circuit_breaker"]["rollbacks"]))
+        job = release.get("drive_job")
+        how = (f"its test-drive job ended ({job}) without finishing the release" if job
+               else f"its test drive stopped reporting before its deadline ({release.get('deadline')})")
         incident = self.gl.create_issue(
             f"Incident: {rid} test drive died mid-way; Watchdog rolled back",
-            f"🛡 Vallum: the test drive for `{rid}` stopped reporting before its deadline ({release.get('deadline')}). "
-            f"The Watchdog sent 100% of traffic back to `{old}`.", [self.pol.label("incident")])
+            f"🛡 Vallum: release `{rid}` was left half-done: {how} "
+            f"(pipeline {release.get('drive_pipeline')}). The Watchdog sent 100% of traffic back to `{old}`.",
+            [self.pol.label("incident")])
         self.store.event("rolled_back", f"Watchdog rolled back {rid}: the drive died", incident=incident["iid"])
         self.notify.alert("merge_requests", release.get("mr_iid"), "Rolled back by the Watchdog", author=release.get("author"),
-                          what=f"The test drive for {rid} went silent past its deadline.",
+                          what=f"Release {rid} was left half-done: {how}.",
                           impact=f"Visitors on the new version were moved back to `{old}`.",
                           done=f"Sent 100% of traffic to `{old}`; opened incident #{incident['iid']}.",
                           nxt="The change stays merged but not live.", action="No.")
