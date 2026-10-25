@@ -2,7 +2,7 @@
 # and the deploy provenance gate refuses to deploy anything that skipped these jobs.
 #
 #   MR pipelines (no tokens, no cloud):  unit tests · promise checker on localhost · SAST · secrets · Gatekeeper report
-#   main push / API pipelines:           provenance gate · unit tests · scans · build image · test drive · Merge Desk
+#   main push / API pipelines:           provenance gate · unit tests · scans · build and scan image · test drive · Merge Desk
 #   main schedule / web pipelines:       Live Patrol (Watchdog, Ledger) · Merge Desk
 #   any main pipeline:                   rollback-now (manual, needs no variables)
 
@@ -28,6 +28,7 @@ variables:
 include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
 
 .if_mr: &if_mr
   if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -157,6 +158,10 @@ build-image:
     - TAG="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/vallum/app:${CI_COMMIT_SHA}"
     - docker build --pull -t "$TAG" .
     - docker push "$TAG"
+    # a copy in the project's own registry, for GitLab container scanning (Package stage)
+    - echo "$CI_JOB_TOKEN" | docker login -u gitlab-ci-token --password-stdin "$CI_REGISTRY"
+    - docker tag "$TAG" "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" > /dev/null
     - DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$TAG")
     - SIZE=$(docker image inspect "$TAG" --format='{{.Size}}')
     - mkdir -p reports
@@ -168,6 +173,18 @@ build-image:
     reports:
       dotenv: reports/build.env
 
+# GitLab container scanning of the image just built; the test drive judges its report at step 0
+# (app-image-no-fixable-critical). It never blocks by itself: the promise decides.
+container_scanning:
+  stage: build
+  needs: [build-image]
+  rules:
+    - <<: *if_release
+      changes: [app/**/*, Dockerfile, requirements.txt, deploy/**/*]
+  variables:
+    CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+  allow_failure: true
+
 # ---------------------------------------------------------------- drive
 test-drive:
   stage: drive
@@ -178,6 +195,7 @@ test-drive:
   needs:
     - provenance-gate
     - { job: build-image, optional: true }
+    - { job: container_scanning, optional: true }
   environment:
     name: production
     url: https://vallum-256944994567.us-central1.run.app/status

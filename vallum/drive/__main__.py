@@ -17,7 +17,7 @@ from pathlib import Path
 
 from simulate.visitors import Visitors, ensure_links, plan_rates
 from vallum import cards as cardlib
-from vallum import agents, allowance, config, evidence, gcp, housekeeping
+from vallum import agents, allowance, config, evidence, gcp, housekeeping, public
 from vallum.checker import core
 from vallum.checker.measure import parse_measure
 from vallum.config import iso, utcnow
@@ -104,6 +104,21 @@ class Drive:
     def promises(self, names: list[str]) -> list[cardlib.Promise]:
         chosen = set(names) & set(self.cards.cards) or set(self.cards.cards)
         return self.cards.promises(where="drive", features=chosen)
+
+    def package_rows(self, packaged: list[cardlib.Promise], reports_dir: Path = Path(".")) -> list[dict]:
+        """Package promises judged on the built image before any visitor: its size (reports/build.json from the
+        build job) and its container scan (the container_scanning job's report). No report means skipped."""
+        try:
+            build = json.loads((REPORTS / "build.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            build = {}
+        rows = []
+        for p in packaged:
+            out = (core.run_static_promise(p, config.ROOT, build) if p.style == "static"
+                   else core.run_scan_promise(p, reports_dir))
+            rows.append({"id": p.id, "feature": p.feature, "type": p.type, "severity": p.severity, **out})
+            log(f"package: {p.feature}/{p.id} {out['verdict']}: {out.get('detail', '')}")
+        return rows
 
     def promise_need(self, p: cardlib.Promise) -> int:
         m = parse_measure(p.data["measure"])
@@ -388,7 +403,7 @@ class Drive:
         log(f"deployed {new_rev} (old {old_rev}); private URL {cand_url}")
 
         # -- step 0: private URL, fresh test links, no visitor involved ---------------
-        rows = []
+        rows = self.package_rows([p for p in promises if p.style in ("static", "scan")])
         with core.client_for(cand_url, timeout=15) as client:
             for p in behave:
                 out = core.run_step_promise(client, p, key, float(self.pol["judge"]["step_retry_s"]))
@@ -505,6 +520,10 @@ class Drive:
                    revision=new_rev, previous_revision=old_rev, feature=info.get("feature"), owner_notified=bool(mr_iid))
         self.store.event("released", f"{rid} {info.get('feature')} released" + (" (first deploy)" if first else ""),
                          release_id=rid)
+        try:
+            public.record_judged(self.store, rid, self.report["steps"])
+        except Exception as exc:  # the status page must never break a release
+            log(f"could not publish the test-drive results: {exc}")
         kept = sorted({f"{r.get('feature')}/{r.get('id')}" for st in self.report["steps"] for r in st.get("rows", [])
                        if r.get("verdict") == "kept"})
         self.gitlab_release(info, new_rev, kept)

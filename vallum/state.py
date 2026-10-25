@@ -6,6 +6,7 @@ Documents:
   vallum_state/meta      counters, Ledger issue number, Safe mode, circuit breaker
   vallum_state/modes     allowance and mode per tier (Layer 3 computes these)
   vallum_state/recent    the last events, newest first (status page and Ledger)
+  vallum_state/public    what the public status page shows: live code's promises and their latest results
   vallum_sanctioned/<sha>   MR head commits the Merge Desk merged (provenance gate)
   vallum_releases/<id>      one audit summary per release
   vallum_status/<target>    timeline behind each live status comment

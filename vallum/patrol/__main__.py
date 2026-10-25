@@ -7,6 +7,7 @@ commands, and the Ledger. Plain code; agents are only started by member-only act
 
 import asyncio
 import json
+import os
 import re
 import sys
 import time
@@ -15,7 +16,7 @@ from datetime import timedelta
 import httpx
 
 from simulate.visitors import Visitors, plan_rates
-from vallum import agents, allowance, config, evidence, gcp
+from vallum import agents, allowance, config, evidence, gcp, public
 from vallum import cards as cardlib
 from vallum.checker import core
 from vallum.cockpit import Cockpit
@@ -106,15 +107,18 @@ class Patrol:
             log(f"serving {revision}, older than the last release {rel.get('promoted_revision')} (rolled back on "
                 "purpose): live promise checks wait for the next release")
         live_cards = self.live_cards()
+        checked = {}
         with core.client_for(self.url, timeout=15) as client:
             for p in ([] if rolled_back else live_cards.promises(where="live")):
                 if p.style != "steps":
                     continue
                 out = core.run_step_promise(client, p, key, float(self.pol["judge"]["step_retry_s"]))
+                checked[f"{p.feature}/{p.id}"] = "broken" if out["verdict"] == "broken" else "kept"
                 if out["verdict"] == "broken":
                     tier = tier_of_promise(p, self.cards.cards)
                     spend[tier] = spend.get(tier, 0) + cost
                     broken.append({"promise": p, "detail": out.get("detail", ""), "tier": tier})
+        self.publish(live_cards, checked, revision, rolled_back)
         samples = self.visitors(key)
         tier_of, limits = allowance.route_profile(self.cards.cards)
         counts = allowance.count(samples, tier_of, limits, float(self.pol.get("allowance", {}).get("slow_factor", 2.0)),
@@ -122,6 +126,20 @@ class Patrol:
         allowance.record(self.store, counts, "patrol", spend, self.pol.window_minutes())
         log(f"visitors: {len(samples)} visits; bad: " + ", ".join(f"{t} {c['bad']}/{c['visits']}" for t, c in counts.items()))
         self.report_broken(broken, revision)
+
+    def publish(self, live_cards: cardlib.CardSet, checked: dict, revision: str | None, rolled_back: bool):
+        """The status page's summary (B27): the live code's promises and what this run found."""
+        project = os.environ.get("CI_PROJECT_URL", "")
+        ledger = self.store.doc("meta").get("ledger_iid")
+        try:
+            public.record_live(self.store, live_cards, checked, revision,
+                               self.store.live_commit(self.pol["cloud_run"]["service"]),
+                               project_url=project, ledger_url=f"{project}/-/issues/{ledger}" if project and ledger else "",
+                               window_minutes=self.pol.window_minutes(), rolled_back=rolled_back,
+                               breaker={"limit": int(self.pol["circuit_breaker"]["rollbacks"]),
+                                        "hours": float(self.pol["circuit_breaker"]["within_hours"])})
+        except Exception as exc:  # the status page must never break the patrol
+            log(f"could not publish the status summary: {type(exc).__name__}: {exc}")
 
     def live_cards(self) -> cardlib.CardSet:
         """The promises of the code that is live, not of main: a feature can be merged but not released (refused

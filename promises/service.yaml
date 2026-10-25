@@ -25,3 +25,15 @@ promises:
     static: {file_lacks: [app/telemetry.py, "client"]}
     where: [mr]
     severity: blocker
+  - id: app-image-small
+    type: cost
+    says: "The app image stays under 250 MB, so deploys and cold starts stay quick and cheap"
+    static: {image_below_mb: 250}
+    where: [drive]
+    severity: major
+  - id: app-image-no-fixable-critical
+    type: security
+    says: "The app image has no critical vulnerability that already has a fix"
+    scan: {report: container, max_severity: high, fixable_only: true}
+    where: [drive]
+    severity: blocker

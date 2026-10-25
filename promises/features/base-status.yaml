@@ -15,6 +15,11 @@ promises:
       steps: ["GET /status -> 200 contains Visitors are simulated"]
       where: [mr, drive, live]
       severity: major
+    - id: status-shows-promises
+      says: "The status page shows the mistake allowance and every feature's promises"
+      steps: ["GET /status -> 200 contains Features and their promises"]
+      where: [mr, drive, live]
+      severity: major
   speed:
     - id: status-fast
       says: "95% of status page loads finish in under 800 ms"

@@ -57,17 +57,27 @@ SEVERITY_ORDER = ["info", "unknown", "low", "medium", "high", "critical"]
 
 def run_scan_promise(promise: Promise, reports_dir: Path) -> dict:
     spec = promise.data["scan"]
-    report = reports_dir / {"sast": "gl-sast-report.json", "secrets": "gl-secret-detection-report.json"}.get(
-        spec.get("report", "sast"), "gl-sast-report.json")
+    report = reports_dir / {"sast": "gl-sast-report.json", "secrets": "gl-secret-detection-report.json",
+                            "container": "gl-container-scanning-report.json"}.get(spec.get("report", "sast"),
+                                                                                  "gl-sast-report.json")
     if not report.exists():
         return {"verdict": "skipped", "detail": f"no {report.name} in this pipeline"}
     limit = SEVERITY_ORDER.index(spec.get("max_severity", "medium").lower())
     vulns = json.loads(report.read_text(encoding="utf-8")).get("vulnerabilities", [])
+    if spec.get("fixable_only"):
+        # a base-image finding with no fixed package yet is not something a release can act on
+        vulns = [v for v in vulns if fixable(v)]
     over = [v for v in vulns if SEVERITY_ORDER.index(str(v.get("severity", "unknown")).lower()) > limit]
+    which = "fixable finding(s)" if spec.get("fixable_only") else "finding(s)"
     if over:
-        names = "; ".join(v.get("name", "?") for v in over[:3])
-        return {"verdict": "broken", "detail": f"{len(over)} finding(s) above {spec.get('max_severity', 'medium')}: {names}"}
-    return {"verdict": "kept", "detail": f"{len(vulns)} finding(s), none above {spec.get('max_severity', 'medium')}"}
+        names = "; ".join(v.get("name") or v.get("message") or "?" for v in over[:3])
+        return {"verdict": "broken", "detail": f"{len(over)} {which} above {spec.get('max_severity', 'medium')}: {names}"}
+    return {"verdict": "kept", "detail": f"{len(vulns)} {which}, none above {spec.get('max_severity', 'medium')}"}
+
+
+def fixable(vuln: dict) -> bool:
+    solution = str(vuln.get("solution") or "").strip().lower()
+    return bool(solution) and not solution.startswith("no solution")
 
 
 def judge_single(promise: Promise, samples: list[dict], min_samples: int, revision: str | None = None) -> dict:
