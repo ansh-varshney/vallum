@@ -344,6 +344,14 @@ class Desk:
                                    now="A reviewer requested changes; waiting for the author's next commit.",
                                    action="push a commit that answers the review points.")
             return None
+        stale = bool(review) and review.get("verdict") != "approve" and review.get("sha")             and review.get("sha") != mr["sha"]
+        if stale:
+            # the change moved on since that verdict (a fix round, the Medic, a rebase): it needs a fresh review
+            self.log(f"!{iid}: the Reviewer's '{review.get('verdict')}' was for {str(review.get('sha'))[:8]}; asking again")
+            goal = {"door": "A" if built_by_vallum else "B", "mode": "review", "merge_request_iid": iid}
+            if self.start_agent(mr, "review", "ship", fp, goal):
+                self.notify.status(MR, iid, "Review", "running", now="The change moved on since the last verdict; the Reviewer is reviewing it again.")
+            return None
         if not review:
             age = utcnow() - (parse_iso(mr.get("created_at")) or utcnow())
             if age < timedelta(minutes=8) and built_by_vallum:

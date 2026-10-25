@@ -935,3 +935,37 @@ def test_two_cards_for_one_feature_both_count(tmp_path):
     assert set(cs.cards) == {"redirect", "redirect@base-redirect"}
     assert {p.id for p in cs.promises(include_service=False)} == {"old-links-work", "redirect-works"}
     assert any(c.get("kind") == "bug-fix" for c in cs.cards.values())
+
+
+def test_an_old_non_approving_verdict_asks_for_a_fresh_review():
+    """Regression (!13): after a released hold the agents changed the MR, but the old needs-human verdict stayed."""
+    from vallum.desk.__main__ import Desk
+
+    class GL(LabelGL):
+        def notes(self, kind, iid, limit=500):
+            return [{"id": 5, "author": {"username": "ai-vallum-ship-gitlab-ai-hackathon"}, "created_at": "2026-10-25T02:26:33Z",
+                     "body": '🛡 Vallum: **Reviewer verdict** · needs-human\n```json\n{"verdict": "needs-human", "sha": "old"}\n```'}]
+
+        def mr_changes(self, iid):
+            return [{"new_path": "promises/features/6-redirect.yaml", "diff": "+guard: true"}]
+
+        def get(self, path, **kw):
+            return []
+
+        def paged(self, path, **kw):
+            return [{"author_name": "Vallum Builder", "author_email": "service_account_x@noreply.gitlab.com"}]
+
+    class Flows:
+        def bots(self):
+            return {"ai-vallum-ship-gitlab-ai-hackathon": "ship"}
+
+    desk = Desk.__new__(Desk)
+    desk.store, desk.pol, desk.notify, desk.gl, desk.flows = Store(MemoryState()), policy(), FakeNotify(), GL(), Flows()
+    desk.store.set_timeline("merge_requests-13", released_for=5)
+    started = []
+    desk.start_agent = lambda mr, kind, key, fp, goal=None: started.append((kind, goal["mode"])) or True
+    desk.pol.data["gate"]["agent_verdicts_required"] = True
+    mr = {"iid": 13, "sha": "new", "labels": ["vallum"], "title": "x", "description": "", "created_at": "2026-10-24T17:11:00Z",
+          "detailed_merge_status": "mergeable"}
+    assert desk.agent_verdicts(mr) is None
+    assert started == [("review", "review")]
