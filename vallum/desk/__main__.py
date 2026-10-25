@@ -13,12 +13,13 @@ the flows' service accounts; only the Inspector, whose input is the evidence bun
 """
 
 import os
+import re
 import sys
 import time
 from datetime import timedelta
 
 from vallum import cards as cardlib
-from vallum import agents, config, evidence, priority, verdicts
+from vallum import agents, config, evidence, housekeeping, priority, verdicts
 from vallum.config import iso, parse_iso, utcnow
 from vallum.flows import DEAD, DONE, Flows, final_json
 from vallum.gate import context, rules
@@ -307,6 +308,36 @@ class Desk:
             self.store.event("needs-human", f"!{mr['iid']}: released by a human", mr_iid=mr["iid"])
             return True
         return False
+
+    def review_blocked(self, mr: dict) -> bool:
+        """GitLab refuses to merge while a reviewer's 'Request changes' stands (seen live: !15 passed 12/12 and the
+        merge got 405 on every run). Agent-built MRs answer review points in agent_verdicts. A housekeeping MR is
+        made by code, so code makes it again from today's code, once; if that one is blocked too, a person decides."""
+        if mr.get("detailed_merge_status") != "requested_changes" or not context.is_housekeeping(self.gl, mr, self.pol):
+            return False
+        iid = mr["iid"]
+        if self.store.timeline(f"{MR}-{iid}").get("regenerated_from"):
+            self.hold_for_human(mr, "A reviewer requested changes on this housekeeping MR, which Vallum already made "
+                                    "again once. GitLab blocks the merge until that review is answered.",
+                                ["Read the review; if it is right, close this MR (the next release makes a new one).",
+                                 "If it is wrong, re-request the review or bypass it, then remove the label."])
+            return True
+        m = re.search(r"after (r-\d+)", mr.get("title", ""))
+        files, _lines, _added = context.mr_changes(self.gl, iid)
+        cards = [f for f in files if f.startswith(cardlib.CARDS_DIR)]
+        actions = housekeeping.changes(config.ROOT, cards, lambda p: self.gl.file_raw_or_none(p, "main"))
+        why = "a reviewer requested changes; Vallum made it again from today's code"
+        new = housekeeping.open_mr(self.gl, self.pol, m.group(1) if m else "the last release", actions, why=why)
+        if new:
+            self.store.set_timeline(f"{MR}-{new['iid']}", regenerated_from=iid)
+            self.log(f"!{iid}: a reviewer requested changes on housekeeping; replaced by !{new['iid']}")
+            self.store.event("housekeeping", f"!{iid} replaced by !{new['iid']}: {why}")
+        else:
+            self.gl.put(f"/projects/:id/merge_requests/{iid}", json={"state_event": "close"})
+            self.gl.add_note(MR, iid, "🛡 Vallum: closed: a reviewer requested changes, and with today's code there "
+                                      "is nothing left to change.")
+            self.log(f"!{iid}: a reviewer requested changes on housekeeping; nothing left to do, closed")
+        return True
 
     def agent_verdicts(self, mr: dict) -> dict | None:
         """Make sure the Reviewer and Inspector have spoken on this change; start them if not.
@@ -647,7 +678,7 @@ class Desk:
         # rebase and wait for a fresh pipeline first: the Reviewer and the Inspector then judge the change as it
         # will merge, with results from today's checker (seen live: an Inspector read results from an old checker)
         mr = self.rebase_and_wait(head)
-        if not mr:
+        if not mr or self.review_blocked(mr):
             self.notify.ledger()
             return 0
         found = self.agent_verdicts(mr)
@@ -711,6 +742,8 @@ class Desk:
             self.log(f"merge failed: {exc}")
             self.store.unsanction(mr["sha"])
             self.store.set_release(slot="idle", release_id=None)
+            # not again on every run: the same commit on the same main is retried only after one of them changes
+            self.store.set_timeline(f"{MR}-{iid}", refused_sha=mr["sha"], refused_main=self.main_head())
             self.notify.status(MR, iid, "Merged", "failed", now=f"GitLab refused the merge: {str(exc)[:200]}",
                                action="check the MR approval rule allows the owner to approve (see README).")
             self.notify.ledger()

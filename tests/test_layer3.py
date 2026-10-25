@@ -815,6 +815,50 @@ def test_housekeeping_mr_names_what_expired_and_sends_no_extra_keys():
     assert "`demo-popular-fast` in `9-demo.yaml`" in mr["description"] and "docs-only" not in mr["description"]
 
 
+def test_a_housekeeping_mr_with_requested_changes_is_made_again_once(monkeypatch):
+    from vallum.desk.__main__ import Desk
+
+    made, held, closed = [], [], []
+    timelines = {}
+
+    class St:
+        def timeline(self, t):
+            return timelines.get(t, {})
+
+        def set_timeline(self, t, **kw):
+            timelines.setdefault(t, {}).update(kw)
+
+        def event(self, *a, **k):
+            pass
+
+    class GL:
+        def put(self, path, json=None):
+            closed.append(path)
+
+        def add_note(self, *a):
+            pass
+
+        def file_raw_or_none(self, p, ref="main"):
+            return CARD_WITH_WATCH
+
+    desk = Desk.__new__(Desk)
+    desk.gl, desk.store, desk.pol, desk.log = GL(), St(), config.policy(), lambda m: None
+    desk.hold_for_human = lambda mr, q, opts, note_id=None: held.append(mr["iid"])
+    monkeypatch.setattr("vallum.desk.__main__.context.is_housekeeping", lambda gl, mr, pol: True)
+    monkeypatch.setattr("vallum.desk.__main__.context.mr_changes",
+                        lambda gl, iid: (["docs/vallum/CODEMAP.md", "promises/features/9-demo.yaml"], 5, []))
+    monkeypatch.setattr("vallum.desk.__main__.housekeeping.changes", lambda root, cards, f: [{"file_path": c} for c in cards])
+    monkeypatch.setattr("vallum.desk.__main__.housekeeping.open_mr",
+                        lambda gl, pol, rid, actions, why=None: made.append((rid, actions, why)) or {"iid": 16})
+
+    mr = {"iid": 15, "title": "Housekeeping after r-0012: refresh", "detailed_merge_status": "requested_changes"}
+    assert desk.review_blocked({**mr, "detailed_merge_status": "not_approved"}) is False
+    assert desk.review_blocked(mr) is True
+    assert made[0][0] == "r-0012" and made[0][1] == [{"file_path": "promises/features/9-demo.yaml"}] and made[0][2]
+    assert timelines["merge_requests-16"]["regenerated_from"] == 15
+    assert desk.review_blocked({**mr, "iid": 16}) is True and held == [16]      # made again once; then a person
+
+
 def test_card_schema_accepts_replay():
     from vallum import cards as cardlib
 

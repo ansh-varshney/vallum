@@ -299,8 +299,10 @@ class Patrol:
     # ------------------------------------------------------------------ rollback for @vallum rollback <feature>
     def rollback_feature(self, feature: str, who: str) -> str:
         rel = self.store.release()
-        if rel.get("slot") not in (None, "idle"):
-            return "a release is in progress; use the `rollback-now` job for an instant rollback."
+        # only a test drive moves traffic; a merge being checked or just merged does not (seen live: the command
+        # was refused while the Merge Desk held the slot for half a minute)
+        if rel.get("slot") == "driving":
+            return "a test drive is moving traffic right now; use the `rollback-now` job for an instant rollback."
         records = [r for _k, r in self.store.b.list("vallum_releases")
                    if r.get("outcome") == "released" and feature in str(r.get("feature", ""))]
         records.sort(key=lambda r: r.get("finished_at", ""))

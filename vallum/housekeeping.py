@@ -66,7 +66,7 @@ def _without_line_numbers(text: str) -> str:
     return re.sub(r", \d+ lines\)", ")", re.sub(r":\d+(-\d+)?\b", "", text))
 
 
-def open_mr(gl, pol, release_id: str, actions: list[dict]) -> dict | None:
+def open_mr(gl, pol, release_id: str, actions: list[dict], why: str | None = None) -> dict | None:
     if not actions:
         return None
     label = pol.label("housekeeping")
@@ -74,8 +74,9 @@ def open_mr(gl, pol, release_id: str, actions: list[dict]) -> dict | None:
              if str(m.get("source_branch", "")).startswith("vallum/housekeeping-") or label in m.get("labels", [])]
     for old in older:
         gl.put(f"/projects/:id/merge_requests/{old['iid']}", json={"state_event": "close"})
-        gl.add_note("merge_requests", old["iid"], f"🛡 Vallum: replaced by the housekeeping after {release_id}.")
-    branch = f"vallum/housekeeping-{release_id}"
+        gl.add_note("merge_requests", old["iid"], f"🛡 Vallum: replaced by the housekeeping after {release_id}"
+                                                  + (f" ({why})." if why else "."))
+    branch = f"vallum/housekeeping-{release_id}" + (f"-{len(older)}" if why else "")
     what = []
     if any(a["file_path"].endswith("CODEMAP.md") for a in actions):
         what.append("refresh the code map")
