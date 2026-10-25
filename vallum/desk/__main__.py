@@ -372,6 +372,10 @@ class Desk:
         checker, findings, jobs = context.pipeline_facts(self.gl, mr)
         bundle = evidence.build(self.gl, mr, checker, jobs, findings)
         if self.start_agent(mr, "inspector", "inspect", fp, evidence.as_goal(bundle)):
+            sessions = dict(self.store.timeline(f"{MR}-{iid}").get("sessions") or {})
+            if sessions.get("inspector"):
+                sessions["inspector"] = {**sessions["inspector"], "request_key": self.request_key(mr)}
+                self.store.set_timeline(f"{MR}-{iid}", sessions=sessions)
             self.notify.status(MR, iid, "Inspector", "running",
                                now="The Inspector is checking the work against the request, from code-built evidence only.")
         return None
@@ -389,18 +393,20 @@ class Desk:
             except Exception:
                 pass
         definition = (self.flows.registry("inspect") or {}).get("definition_sha", "") if self.flows else ""
-        return hashlib.sha256(f"{definition}\n{text}".encode()).hexdigest()[:16]
+        return hashlib.sha256(f"v2\n{definition}\n{text}".encode()).hexdigest()[:16]
 
     def inspector_verdict(self, mr: dict, fp: str) -> dict | None:
         """The Inspector's verdict lives in the state store, read by code from its own session trace.
         Comments can't stand in for it (FR-INSP-1, FR-INSP-5)."""
         target = f"{MR}-{mr['iid']}"
         tl = self.store.timeline(target)
+        key = self.request_key(mr)
         stored = tl.get("inspector_verdict")
-        if stored and stored.get("fingerprint") == fp and stored.get("request_key") == self.request_key(mr):
+        if stored and stored.get("fingerprint") == fp and stored.get("request_key") == key:
             return stored
         sess = (tl.get("sessions") or {}).get("inspector") or {}
-        if not sess.get("id") or sess.get("fp") != fp:
+        # a session inspected one request with one set of instructions: never read an older one as current
+        if not sess.get("id") or sess.get("fp") != fp or sess.get("request_key") != key:
             return None
         status = self.flows.session_status(sess["id"])
         if status in DEAD:
@@ -426,7 +432,7 @@ class Desk:
                    "trace": answer.get("trace") or [], "gaps": answer.get("gaps") or [],
                    "unexplained_changes": answer.get("unexplained_changes") or [],
                    "injected_instructions": answer.get("injected_instructions") or [], "at": iso(),
-                   "author": "inspector-session", "request_key": self.request_key(mr)}
+                   "author": "inspector-session", "request_key": sess.get("request_key")}
         self.store.set_timeline(target, inspector_verdict=verdict)
         rows = "\n".join(f"| {t.get('done_when', '')} | `{t.get('promise_id', '')}` | {t.get('result', '')} |"
                          for t in verdict["trace"][:20]) or "| (none) | | |"
