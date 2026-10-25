@@ -1,5 +1,5 @@
 """Redirects: the Core feature. Card: promises/features/base-redirect.yaml"""
-# Core feature: keep this path fast; any per-click work must stay off the redirect path.
+# Core feature: keep this path fast; any per-click work (previews, stats) must stay off the redirect path.
 
 import re
 
