@@ -252,6 +252,21 @@ def test_local_load_tags_a_popular_link():
     assert sum(1 for s in samples if s.get("popular") == 0) == 10
 
 
+def test_a_job_running_older_code_stands_down(monkeypatch):
+    class GL:
+        def __init__(self, head):
+            self.head = head
+
+        def branch_head(self, branch="main"):
+            return self.head
+
+    monkeypatch.setenv("CI_COMMIT_SHA", "aaa")
+    assert config.running_stale_code(GL("bbb")) == "bbb"
+    assert config.running_stale_code(GL("aaa")) is None
+    monkeypatch.delenv("CI_COMMIT_SHA")
+    assert config.running_stale_code(GL("bbb")) is None             # outside CI: always act
+
+
 def test_yellow_adds_the_extra_step():
     pol = policy()
     assert pol.steps("standard", "green") == [10, 50, 100]

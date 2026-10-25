@@ -153,7 +153,9 @@ class Cockpit:
         try:
             if tick():
                 self.keep_listening(float(self.pol.get("cockpit", {}).get("listen_after_command_min", 20)))
-        except Exception as exc:  # watching must never stop the listener
+        except Exception as exc:  # watching must never stop the listener (except a deliberate stop)
+            if type(exc).__name__ == "StopListening":
+                raise
             print(f"[cockpit] watch failed: {type(exc).__name__}: {exc}", flush=True)
 
     def keep_listening(self, minutes: float):

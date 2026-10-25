@@ -9,6 +9,7 @@ import asyncio
 import json
 import re
 import sys
+import time
 from datetime import timedelta
 
 import httpx
@@ -28,6 +29,10 @@ from vallum.watch import Watcher
 from vallum.state import Store
 
 ISSUES = "issues"
+
+
+class StopListening(Exception):
+    pass
 CONFIRM_RUNS = 2          # a live break must be seen on two patrols in a row before it becomes an incident
 
 
@@ -349,8 +354,23 @@ class Patrol:
         cockpit = Cockpit(self.gl, self.store, self.pol, self.notify, self.flows, rollback=self.rollback_feature)
         try:
             watcher = Watcher(self.gl, self.store, self.pol, self.notify, log=log)
-            done = cockpit.listen(budget_s=60 * float(cfg.get("job_listen_max_min", 8)), poll_s=float(cfg.get("poll_s", 15)),
-                                  tick=watcher.tick)
+            checked = {"at": 0.0, "stale": False}
+
+            def tick():
+                # stop listening once main has newer code: the next patrol listens with it
+                if time.monotonic() - checked["at"] > 120:
+                    checked["at"] = time.monotonic()
+                    checked["stale"] = bool(config.running_stale_code(self.gl))
+                if checked["stale"]:
+                    raise StopListening()
+                return watcher.tick()
+
+            try:
+                done = cockpit.listen(budget_s=60 * float(cfg.get("job_listen_max_min", 8)),
+                                      poll_s=float(cfg.get("poll_s", 15)), tick=tick)
+            except StopListening:
+                done = []
+                log("cockpit: main has newer code; stopped listening (the next patrol takes over)")
             until = cockpit.listening_until()
             log("cockpit: " + (", ".join(done) if done else "nothing")
                 + (f" (listen mode until {until.strftime('%H:%M')} UTC)" if until and until > utcnow() else ""))

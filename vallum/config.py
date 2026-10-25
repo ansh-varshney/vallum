@@ -107,6 +107,20 @@ def project_id() -> str:
     return os.environ.get("CI_PROJECT_ID", "87894346")
 
 
+def running_stale_code(gl) -> str | None:
+    """A main-pipeline job running older code than main has now (it waited in a queue, or a newer push landed).
+    Returns main's head if so. Such a job must not act: the job of the newer pipeline will (seen live: a desk job
+    queued for 20 minutes re-applied a verdict that newer code had already discarded)."""
+    sha = os.environ.get("CI_COMMIT_SHA")
+    if not sha:
+        return None
+    try:
+        head = gl.branch_head(os.environ.get("CI_DEFAULT_BRANCH", "main"))
+    except Exception:
+        return None
+    return head if head and head != sha else None
+
+
 def service_url(pol: Policy) -> str:
     cr = pol["cloud_run"]
     number = os.environ.get("GCP_PROJECT_NUMBER", "256944994567")

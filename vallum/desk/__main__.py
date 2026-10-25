@@ -729,6 +729,11 @@ class Desk:
 def main():
     pol = config.policy()
     gl = GitLab.from_env(require_token=True)
+    newer = config.running_stale_code(gl)
+    if newer:
+        print(f"[merge-desk] main has newer code ({newer[:8]}); this job runs {os.environ.get('CI_COMMIT_SHA', '')[:8]}, "
+              "so it leaves the queue to the newer pipeline's Merge Desk", flush=True)
+        sys.exit(0)
     store = Store.from_env()
     sys.exit(Desk(gl, store, pol).run())
 
