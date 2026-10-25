@@ -21,8 +21,9 @@ RUNNING = {"created", "pending", "running", "waiting_for_resource", "preparing",
 
 
 def fingerprint(mr: dict, needs_human: str, pipeline: str | None = None) -> list:
+    # user_notes_count: a new verdict or comment (the desk's next step often waits on one)
     return [mr.get("sha"), mr.get("detailed_merge_status"), needs_human in (mr.get("labels") or []),
-            sorted(r.get("id") for r in mr.get("reviewers") or []), pipeline]
+            sorted(r.get("id") for r in mr.get("reviewers") or []), pipeline, mr.get("user_notes_count")]
 
 
 class Watcher:
