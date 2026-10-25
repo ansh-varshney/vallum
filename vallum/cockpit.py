@@ -136,6 +136,7 @@ class Cockpit:
         """Scan once; then, while listen mode is on, scan again every `poll_s` seconds for up to `budget_s`.
         `tick` (the MR watcher) runs on every pass; any change on a Vallum MR switches listen mode on."""
         handled = self.run()
+        self._refresh(handled)
         self._tick(tick)
         end = clock() + budget_s
         while clock() + poll_s < end:
@@ -143,9 +144,20 @@ class Cockpit:
             if not until or until <= utcnow():
                 break
             sleep(poll_s)
-            handled += self.run()
+            done = self.run()
+            self._refresh(done)
+            handled += done
             self._tick(tick)
         return handled
+
+    def _refresh(self, done: list[str]):
+        # the Ledger shows a command's effect at once, not when the listener ends (seen live: Safe mode still
+        # read ON for 20 minutes after `@vallum resume`)
+        if done:
+            try:
+                self.notify.ledger()
+            except Exception as exc:
+                print(f"[cockpit] ledger refresh failed: {type(exc).__name__}: {exc}", flush=True)
 
     def _tick(self, tick):
         if not tick:

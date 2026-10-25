@@ -355,8 +355,11 @@ def test_listen_mode_keeps_scanning_then_stops():
         return real_run()
 
     pit.run = counting_run
+    refreshed = []
+    notify.ledger = lambda: refreshed.append(scans["n"])
     pit.listen(budget_s=60, poll_s=15, sleep=lambda s: now.__setitem__("t", now["t"] + s), clock=lambda: now["t"])
     assert scans["n"] == 4                                        # 0 s, 15 s, 30 s, 45 s
+    assert refreshed[:1] == [1]                                   # the command's effect shows on the Ledger at once
     assert "Listen mode:** on until" in pit.do_status("issues", 9, "", "user10")
     pit.do_listen("issues", 9, "off", "user10")
     scans["n"] = 0
