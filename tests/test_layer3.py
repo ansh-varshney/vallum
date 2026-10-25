@@ -1020,3 +1020,17 @@ def test_an_old_inspector_session_is_never_read_as_current():
     desk.store.set_timeline("merge_requests-13", sessions={"inspector": {"id": 1, "fp": "f", "sha": "s0"}},
                             inspector_verdict={"verdict": "gaps", "fingerprint": "f", "request_key": "old"})
     assert desk.inspector_verdict(mr, "f") is None              # neither the old verdict nor the old session counts
+
+
+def test_step_zero_judges_each_promise_on_its_own_need():
+    """Regression (r-0010): a popular-only watch promise was held to the route's reliability need."""
+    from vallum.cards import Promise
+    from vallum.drive.__main__ import Drive
+
+    drive = Drive.__new__(Drive)
+    drive.pol = policy()
+    watch = Promise("w", "speed", {"measure": "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"}, "x", "watch")
+    rel = Promise("r", "reliability", {"measure": "error_rate(route='GET /r/{code}') < 0.1%"}, "x", "card")
+    assert drive.promise_need(watch) < drive.promise_need(rel)
+    assert drive.needs([watch, rel])["GET /r/{code}"] == max(2 * drive.promise_need(watch), drive.promise_need(rel))
+

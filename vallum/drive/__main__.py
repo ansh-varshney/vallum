@@ -82,11 +82,17 @@ class Drive:
         chosen = set(names) & set(self.cards.cards) or set(self.cards.cards)
         return self.cards.promises(where="drive", features=chosen)
 
+    def promise_need(self, p: cardlib.Promise) -> int:
+        m = parse_measure(p.data["measure"])
+        return int(p.data.get("judge", {}).get("min_samples", self.pol.min_samples(m.kind)))
+
     def needs(self, metric: list[cardlib.Promise]) -> dict:
+        """Visits to plan per route. A filtered promise (for example popular == 1) only sees part of a route's
+        visits, so it is planned with twice its need (seen live: 136 of 160 popular samples at step 0)."""
         out = {}
         for p in metric:
             m = parse_measure(p.data["measure"])
-            need = int(p.data.get("judge", {}).get("min_samples", self.pol.min_samples(m.kind)))
+            need = self.promise_need(p) * (2 if m.filters else 1)
             out[m.route] = max(out.get(m.route, 0), need)
         return out
 
@@ -367,8 +373,7 @@ class Drive:
         asyncio.run(v.run(rates, seconds))
         warm = [s for s in v.samples if s.get("t", 0) >= 2.0]   # skip connection set-up in the first seconds
         for p in metric:
-            m = parse_measure(p.data["measure"])
-            got = core.judge_single(p, warm, int(needs.get(m.route, 1) * 0.8), revision=new_rev)
+            got = core.judge_single(p, warm, int(self.promise_need(p) * 0.8), revision=new_rev)
             rows.append({"id": p.id, "feature": p.feature, "type": p.type, "severity": p.severity, **got})
         bad = [r for r in rows if r["verdict"] in ("broken", "collecting") and judge.blocks(r["severity"], tier)]
         self.report["steps"].append({"step": 0, "url": cand_url, "visits": len(v.samples), "rows": rows,
