@@ -55,6 +55,7 @@ def test_status_page_shows_tiers_features_promises_and_events():
     assert "90% left" in page and "2 bad of 460 visits; 20 allowed in the last 60 min" in page and "no visits in the last 60 min" in page
     assert "Last release: r-0017 (redirect)" in page and "!17 Housekeeping" in page
     assert "broken in production" in page and "<details open>" in page    # a broken feature opens by itself
+    assert "3 promises · 1 kept · 1 broken" in page
     assert "kept in test drive r-0017 at 50%: 47 ms (limit 150 ms, n=626)" in page
     assert "checked on every merge request" in page
     assert "A known code &lt;b&gt;redirects&lt;/b&gt;" in page and "<b>redirects</b>" not in page

@@ -58,7 +58,7 @@ def tiers_html(modes: dict, window: float | None) -> str:
         mode = (m.get("mode") or "green").lower()
         visits, bad, allowed = int(m.get("visits", 0)), int(m.get("bad", 0)), m.get("allowed_bad")
         span = f" in the last {window:g} min" if window else ""
-        detail = (f"{bad} bad of {visits} visits; {allowed:g} allowed{span}" if visits and allowed is not None
+        detail = (f"{bad} bad of {visits} visits; {round(float(allowed))} allowed{span}" if visits and allowed is not None
                   else f"no visits{span}")
         label = "whole app" if t == "app" else t.capitalize()
         rows.append(f'<div class="tier"><div class="row"><b>{esc(label)}</b>{_pill(mode.upper(), _mode_tone(mode))}'
@@ -132,7 +132,8 @@ def features_html(public: dict, switches: dict | None = None) -> str:
         promises = f.get("promises") or []
         results = [_result(p, judged, name, checked_at) for p in promises]
         broken = sum(1 for tone, _ in results if tone == "bad")
-        summary = f"{len(promises)} promises" + (f", {broken} broken" if broken else "")
+        kept = sum(1 for tone, _ in results if tone == "good")
+        summary = f"{len(promises)} promises · {kept} kept" + (f" · {broken} broken" if broken else "")
         rows = "".join(
             f'<li><span class="dot {tone}" aria-hidden="true"></span><div><b>{esc(p.get("id"))}</b> '
             f'<span class="muted">{esc(p.get("type"))} · {esc(p.get("severity"))}</span><br>{esc(p.get("says"))}'
@@ -204,7 +205,7 @@ section{background:var(--card);border:1px solid var(--line);border-radius:12px;p
 .chips{margin:4px 0 8px}.note{color:var(--bad)}
 details{border-top:1px solid var(--line);padding:10px 0}details:first-of-type{border-top:0}
 summary{cursor:pointer;display:flex;align-items:center;gap:6px;flex-wrap:wrap;list-style:none}
-summary::-webkit-details-marker{display:none}summary::before{content:"B8";color:var(--muted);transition:transform .15s}
+summary::-webkit-details-marker{display:none}summary::before{content:"▸";color:var(--muted);transition:transform .15s}
 details[open]>summary::before{transform:rotate(90deg)}
 ul.promises,ul.events{list-style:none;padding:0;margin:8px 0 0}ul.promises li{display:flex;gap:10px;padding:6px 0;border-top:1px dashed var(--line)}
 .dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:6px}.dot.good{background:var(--good)}
