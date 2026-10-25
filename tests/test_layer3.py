@@ -278,6 +278,10 @@ def test_a_small_first_step_carries_a_promise_still_collecting():
     assert judge.overall(rows, "core", 120, 120, final=True) == judge.COLLECTING
     assert judge.overall(rows, "core", 240, 120, final=True) == judge.AT_RISK
     assert judge.overall([{"verdict": judge.BROKEN, "severity": "blocker"}], "core", 120, 120, True, carry=True) == judge.BROKEN
+    # a promise near its limit still rolls back at once at a small step (the Inspector asked on !18)
+    assert judge.overall([{"verdict": judge.AT_RISK, "severity": "blocker"}], "core", 60, 120, False, carry=True) == judge.AT_RISK
+    assert judge.overall(rows + [{"verdict": judge.AT_RISK, "severity": "blocker"}], "core", 240, 120, True,
+                         carry=True) == judge.AT_RISK
 
 
 def test_a_rollback_is_done_when_visitors_get_the_old_revision():
