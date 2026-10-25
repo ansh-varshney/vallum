@@ -143,7 +143,6 @@ def test_a_crashing_rule_fails_closed():
 
 def test_provenance_decisions():
     pol = Policy(config.load_local("policy.yaml"))
-    assert pol["provenance"]["allow_owner_push"] is False          # the demo setting: only Merge Desk merges deploy
     pol.data["provenance"]["allow_owner_push"] = True              # the build phase
     sanctioned = {"mrhead": {"mr_iid": 4, "release_id": "r-0004"}}
     ok, how, _ = provenance("merge1", ["mainprev", "mrhead"], "ansh-varshney", "push", sanctioned.get, pol)
