@@ -108,20 +108,24 @@ def local_load(client, routes: set[str], per_route: int, api_key: str | None) ->
         method, _, path = route.partition(" ")
         if method not in ("GET", "POST"):
             continue
-        for i in range(per_route):
+        # redirects: every other visit goes to one hot link (tagged popular, like the visitor simulation), so
+        # promises filtered on `popular == 1` can be judged here too
+        hot = path.startswith("/r/")
+        for i in range(per_route * 2 if hot else per_route):
             start = time.perf_counter()
+            popular = 1 if hot and i % 2 == 0 else 0
             try:
                 if method == "POST":
                     resp = client.post(path, json={"url": f"https://example.com/p-{i}-{time.time_ns()}"},
                                        headers={"X-API-Key": api_key or ""})
                 else:
-                    resp = client.get(concrete_path(path, codes, i))
+                    resp = client.get(_PARAM.sub(codes[0], path) if popular else concrete_path(path, codes, i))
                 ms = (time.perf_counter() - start) * 1000
                 samples.append({"route": route, "status": resp.status_code, "ms": ms, "ok": resp.status_code < 500,
-                                "revision": resp.headers.get("x-revision")})
+                                "revision": resp.headers.get("x-revision"), "popular": popular})
             except Exception:
                 samples.append({"route": route, "status": 0, "ms": (time.perf_counter() - start) * 1000, "ok": False,
-                                "revision": None})
+                                "revision": None, "popular": popular})
     return samples
 
 

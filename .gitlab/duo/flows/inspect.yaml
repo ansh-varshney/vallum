@@ -28,10 +28,13 @@ prompts:
 
         Answer one question: did the change build what the request asked, and do the facts prove it?
         Check, using only the bundle:
-        1. Trace: every line in request.done_when maps to at least one promise id in the card(s), and that
-           promise's verdict in checker.promises is "kept".
+        1. Trace: every line in request.done_when maps to at least one promise id in the cards (the MR's own
+           card and the cards of features the change touches, marked "touched"), and that promise's verdict in
+           checker.promises is "kept". A learned promise (feature "learned") counts too. A promise that only
+           runs in the test drive (where has no "mr") counts as covered if it exists; the drive judges it.
         2. Fail-first: checker.fail_first.ok is true, and each new behavior promise failed on main and passed
-           on the branch.
+           on the branch, except a regression guard (guard: true), which must pass on both. Guards alone are
+           fine on a fix card (kind bug-fix, security-fix or performance).
         3. owns: every app file and route the diff adds is listed in the card's owns.files / owns.routes.
         4. No unexplained changes: list any changed file or behavior that no done-when line asks for.
         5. Watch promises (card.watch), if any, each have a measure or steps the checker can run.

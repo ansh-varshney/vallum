@@ -236,6 +236,22 @@ def test_guard_promises_are_only_enough_for_fixes():
     assert [p for p in cardlib.validate(card, config.load_local("catalog.yaml")) if "guard" in p] == []
 
 
+def test_local_load_tags_a_popular_link():
+    """Regression (!13): the learned promise (popular == 1) was 'collecting' in every MR pipeline."""
+    from vallum.checker import core
+
+    class Client:
+        def post(self, path, json=None, headers=None):
+            return httpx.Response(201, json={"code": f"c{len(json['url'])}"})
+
+        def get(self, path):
+            return httpx.Response(302, headers={"x-revision": "local"})
+
+    samples = core.local_load(Client(), {"GET /r/{code}"}, 10, "k")
+    assert sum(1 for s in samples if s.get("popular") == 1) == 10
+    assert sum(1 for s in samples if s.get("popular") == 0) == 10
+
+
 def test_yellow_adds_the_extra_step():
     pol = policy()
     assert pol.steps("standard", "green") == [10, 50, 100]

@@ -68,6 +68,19 @@ def build(gl, mr: dict, checker: dict | None, jobs: list[dict], findings: list |
                 except yaml.YAMLError:
                     cards.append({"path": path, "card": None, "error": "not valid YAML"})
 
+    try:
+        from vallum import cards as cardlib
+
+        head = cardlib.load_from_gitlab(gl, mr["sha"])
+        have = {c["path"] for c in cards}
+        changed = [d.get("new_path") for d in diffs if d.get("new_path")]
+        for name in sorted(cardlib.blast_radius(changed, head.cards)):
+            path = head.paths.get(name)
+            if path and path not in have:
+                cards.append({"path": path, "card": head.cards[name], "touched": True})
+    except Exception:
+        pass
+
     total = 0
     diff_out = []
     for d in diffs:

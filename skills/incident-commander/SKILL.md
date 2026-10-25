@@ -37,6 +37,8 @@ A broken **watch** promise becomes permanent: copy it with `learned_from`. Commi
 `vallum,priority::P1`. Never edit or delete existing files.
 
 ## 3. Fix issue (Door C: code starts the Ship flow on it by itself)
+Every "How will we know it works?" line must be provable by a promise (a card's, the learned one, or one the
+fix adds); never list outcomes like modes or allowances recovering, which code measures by itself.
 `create_issue` titled `Fix: <cause in a few words>` with the cause, the diff lines, and a "How will we know it
 works?" section with one line per done-when; labels `vallum,vallum-fix,priority::P0` if the tier is Core,
 else `vallum,vallum-fix,priority::P1`.

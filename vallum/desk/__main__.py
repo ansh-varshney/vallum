@@ -376,13 +376,28 @@ class Desk:
                                now="The Inspector is checking the work against the request, from code-built evidence only.")
         return None
 
+    def request_key(self, mr: dict) -> str:
+        """What else the Inspector judged besides the change: the request text and its own instructions. A verdict
+        is reused only while both are the same (seen live: a corrected request kept its old 'gaps')."""
+        import hashlib
+
+        text = mr.get("description") or ""
+        issue = evidence.related_issue(text)
+        if issue:
+            try:
+                text = self.gl.get(f"/projects/:id/issues/{issue}").get("description") or ""
+            except Exception:
+                pass
+        definition = (self.flows.registry("inspect") or {}).get("definition_sha", "") if self.flows else ""
+        return hashlib.sha256(f"{definition}\n{text}".encode()).hexdigest()[:16]
+
     def inspector_verdict(self, mr: dict, fp: str) -> dict | None:
         """The Inspector's verdict lives in the state store, read by code from its own session trace.
         Comments can't stand in for it (FR-INSP-1, FR-INSP-5)."""
         target = f"{MR}-{mr['iid']}"
         tl = self.store.timeline(target)
         stored = tl.get("inspector_verdict")
-        if stored and stored.get("fingerprint") == fp:
+        if stored and stored.get("fingerprint") == fp and stored.get("request_key") == self.request_key(mr):
             return stored
         sess = (tl.get("sessions") or {}).get("inspector") or {}
         if not sess.get("id") or sess.get("fp") != fp:
@@ -411,7 +426,7 @@ class Desk:
                    "trace": answer.get("trace") or [], "gaps": answer.get("gaps") or [],
                    "unexplained_changes": answer.get("unexplained_changes") or [],
                    "injected_instructions": answer.get("injected_instructions") or [], "at": iso(),
-                   "author": "inspector-session"}
+                   "author": "inspector-session", "request_key": self.request_key(mr)}
         self.store.set_timeline(target, inspector_verdict=verdict)
         rows = "\n".join(f"| {t.get('done_when', '')} | `{t.get('promise_id', '')}` | {t.get('result', '')} |"
                          for t in verdict["trace"][:20]) or "| (none) | | |"
@@ -426,6 +441,13 @@ class Desk:
             f"inspected change `{fp}`._"))
         self.store.event("agent", f"!{mr['iid']}: Inspector says {verdict['verdict']}", mr_iid=mr["iid"])
         return verdict
+
+    def main_head(self) -> str | None:
+        """A refusal holds until the MR gets a new commit or main moves (main may have fixed the cause)."""
+        try:
+            return self.gl.get(f"/projects/:id/repository/branches/{self.pol['project'].get('default_branch', 'main')}")["commit"]["id"]
+        except Exception:
+            return None
 
     def rebase_if_main_moved(self, mr: dict, tl: dict) -> bool:
         """A failed MR behind main: rebase it for free (no credits) once per main commit, since main may already
@@ -576,7 +598,9 @@ class Desk:
         ready, waiting, failed = self.classify(self.gl.open_mrs(self.pol.label("opt_in")))
         for mr in ready:
             self.close_steps(mr["iid"], ["Pipeline Medic", "Checks"])
-        refused = [m for m in ready if self.store.timeline(f"{MR}-{m['iid']}").get("refused_sha") == m["sha"]]
+        main_head = self.main_head()
+        refused = [m for m in ready if self.store.timeline(f"{MR}-{m['iid']}").get("refused_sha") == m["sha"]
+                   and self.store.timeline(f"{MR}-{m['iid']}").get("refused_main") == main_head]
         held = [m for m in ready + failed if self.store.timeline(f"{MR}-{m['iid']}").get("held_for")
                 and self.pol.label("needs_human") in m.get("labels", [])]
         ready = [m for m in ready if m not in refused and m not in held]
@@ -638,7 +662,8 @@ class Desk:
                 self.notify.status(MR, iid, f"Gatekeeper {report['score']}", "waiting", tier=tier,
                                    now=f"Not merged yet: {failed_rules}. The desk tries again on its next run.", action="nothing.")
             else:
-                self.store.set_timeline(f"{MR}-{iid}", refused_sha=mr["sha"], blocked_sha=mr["sha"])
+                self.store.set_timeline(f"{MR}-{iid}", refused_sha=mr["sha"], blocked_sha=mr["sha"],
+                                        refused_main=self.main_head())
                 self.notify.status(MR, iid, f"Gatekeeper {report['score']}", "failed", tier=tier,
                                    now=f"Not merged. {failed_rules}", action="fix the failed rules and push; the desk retries after a new commit.")
                 self.gl.mr_labels(iid, add=[self.pol.label("blocked")], remove=[self.pol.label("ready")])
