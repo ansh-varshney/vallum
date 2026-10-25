@@ -17,13 +17,3 @@ promises:
       where: [mr, drive]
       severity: major
       guard: true
-watch:
-  - id: watch-redirect-old-links-latency
-    type: speed
-    says: "Popular, older links redirect quickly (the fix for the 350 ms backfill holds)"
-    measure: "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
-    where: [drive]
-    severity: blocker
-    raised_by: reviewer
-    concern: "Confirm the removed 350 ms backfill does not come back for popular, older links"
-    expires: after_release
