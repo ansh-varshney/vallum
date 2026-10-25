@@ -111,6 +111,6 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - `tests/test_gate.py`: 15 test(s)
 - `tests/test_gitlab_client.py`: 2 test(s)
 - `tests/test_layer2.py`: 12 test(s)
-- `tests/test_layer3.py`: 25 test(s)
+- `tests/test_layer3.py`: 27 test(s)
 - `tests/test_state_notify_priority.py`: 9 test(s)
 - `tests/test_version.py`: 1 test(s)
