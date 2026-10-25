@@ -638,12 +638,14 @@ class Desk:
         self.notify.status(MR, iid, "Queued", "done", note="next", title=head["title"], priority=self.level(head),
                            issue_iid=evidence.related_issue(head.get("description")), now="Picked up by the Merge Desk.",
                            action="nothing.")
-        found = self.agent_verdicts(head)
-        if found is None:
-            self.notify.ledger()
-            return 0
+        # rebase and wait for a fresh pipeline first: the Reviewer and the Inspector then judge the change as it
+        # will merge, with results from today's checker (seen live: an Inspector read results from an old checker)
         mr = self.rebase_and_wait(head)
         if not mr:
+            self.notify.ledger()
+            return 0
+        found = self.agent_verdicts(mr)
+        if found is None:
             self.notify.ledger()
             return 0
 
