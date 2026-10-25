@@ -32,6 +32,24 @@ def decide(sha: str, parents: list[str], pusher: str, source: str, lookup, pol) 
     return False, "unsanctioned", {"detail": f"@{pusher} pushed {sha[:8]} to main without the Merge Desk"}
 
 
+def rules_before(gl, before: str | None, parents: list[str], current: config.Policy) -> config.Policy:
+    """A push is judged by main's rules from before it. Read from the pushed commit, one commit could add its
+    pusher to `owners` with `allow_owner_push` on and pass the gate it just rewrote, and turning the flag off was
+    judged by itself and stopped. If the earlier rules can't be read, owner pushes are refused (fail closed)."""
+    ref = before if before and before.strip("0") else (parents[0] if parents else None)
+    text = None
+    if ref:
+        try:
+            text = gl.file_raw_or_none("vallum/policy.yaml", ref)
+        except Exception:
+            text = None
+    if text:
+        return config.Policy(config.load_yaml_text(text))
+    closed = dict(current.data)
+    closed["provenance"] = {**(current.get("provenance") or {}), "allow_owner_push": False}
+    return config.Policy(closed)
+
+
 def open_revert(gl, sha: str) -> str | None:
     branch = f"vallum/revert-{sha[:8]}"
     try:
@@ -61,7 +79,8 @@ def main():
     gl = GitLab.from_env(require_token=True)
     store = Store.from_env()
     parents = gl.commit(sha).get("parent_ids", [])
-    ok, how, info = decide(sha, parents, pusher, source, store.sanctioned, pol)
+    judged_by = rules_before(gl, os.environ.get("CI_COMMIT_BEFORE_SHA"), parents, pol)
+    ok, how, info = decide(sha, parents, pusher, source, store.sanctioned, judged_by)
     out = Path("reports/provenance.env")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(

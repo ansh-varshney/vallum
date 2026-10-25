@@ -36,7 +36,7 @@ def log(msg: str):
     print(f"[drive {utcnow().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def wait_serving(url: str, revision: str, streak: int = 15, timeout: float = 90, get=None, sleep=time.sleep,
+def wait_serving(url: str, revision: str, streak: int = 15, timeout: float = 180, get=None, sleep=time.sleep,
                   clock=time.monotonic) -> bool:
     """A rollback is done when visitors get the old revision: 15 answers in a row from it. Cloud Run's own report
     of a new split lags minutes behind the switch, so the time is measured on the live app."""
@@ -157,6 +157,18 @@ class Drive:
 
     def wait_serving(self, revision: str) -> bool:
         return wait_serving(self.url, revision)
+
+    def confirm_live(self, traffic: list[dict], revision: str) -> bool:
+        """Every visitor on `revision` before Vallum says so (seen live: r-0017 said 'live for everyone' while
+        Cloud Run still served the 50% split for another 50 s). Not confirmed: the split is sent once more."""
+        t0 = time.monotonic()
+        for attempt in (1, 2):
+            self.cr.set_traffic(traffic)
+            if wait_serving(self.url, revision):
+                log(f"every visitor is on {revision} ({time.monotonic() - t0:.0f} s after the switch)")
+                return True
+            log(f"{revision} is not serving everyone yet (attempt {attempt})")
+        return False
 
     def spend(self, samples: list[dict], label: str, new_rev: str | None = None):
         """Every simulated visit during a traffic step is a visit; the bad ones the new revision served spend
@@ -483,7 +495,7 @@ class Drive:
     # ---------------------------------------------------------------- outcomes
     def promote(self, info, new_rev, old_rev, first=False) -> int:
         rid, mr_iid = info["release_id"], info.get("mr_iid")
-        self.cr.set_traffic([{"revisionName": new_rev, "percent": 100, "tag": "cand"}])
+        self.confirm_live([{"revisionName": new_rev, "percent": 100, "tag": "cand"}], new_rev)
         rel = self.store.release()
         history = ([old_rev] if old_rev else []) + [r for r in rel.get("previous_good", []) if r != old_rev]
         self.store.set_release(slot="idle", last_good=new_rev, previous_good=history[:5], candidate=None, step=None,

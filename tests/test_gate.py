@@ -153,3 +153,38 @@ def test_provenance_decisions():
     pol.data["provenance"]["allow_owner_push"] = False
     assert not provenance("x", ["p"], "ansh-varshney", "push", sanctioned.get, pol)[0]
     assert provenance("x", [], "anyone", "schedule", sanctioned.get, pol)[0]
+
+
+def test_provenance_judges_a_push_by_mains_rules_from_before_it():
+    """A push can't rewrite the rule that judges it: not to let itself in, and not to lock itself out."""
+    import yaml
+
+    from vallum.gate.provenance import rules_before
+
+    base = config.load_local("policy.yaml")
+    on = copy.deepcopy(base)
+    on["provenance"]["allow_owner_push"] = True
+    off = copy.deepcopy(base)
+    off["provenance"]["allow_owner_push"] = False
+
+    class GL:
+        def __init__(self, files):
+            self.files = files
+
+        def file_raw_or_none(self, path, ref):
+            return yaml.safe_dump(self.files[ref]) if ref in self.files else None
+
+    # turning the flag off is judged by the rules before it (on): allowed
+    judged = rules_before(GL({"old": on}), "old", ["old"], Policy(off))
+    assert provenance("x", ["old"], "ansh-varshney", "push", {}.get, judged)[1] == "owner-push"
+    # adding oneself to owners with the flag on is judged by the rules before it (flag off, not an owner): stopped
+    evil = copy.deepcopy(on)
+    evil["owners"] = list(evil.get("owners", [])) + ["ai-vallum-ship-bot"]
+    judged = rules_before(GL({"old": off}), "old", ["old"], Policy(evil))
+    assert provenance("x", ["old"], "ai-vallum-ship-bot", "push", {}.get, judged)[1] == "unsanctioned"
+    # no CI_COMMIT_BEFORE_SHA (an api pipeline): the parent's rules
+    judged = rules_before(GL({"par": on}), "0000000000000000000000000000000000000000", ["par"], Policy(off))
+    assert judged.get("provenance")["allow_owner_push"] is True
+    # the earlier rules can't be read: owner pushes are refused
+    judged = rules_before(GL({}), "old", ["old"], Policy(on))
+    assert provenance("x", ["old"], "ansh-varshney", "push", {}.get, judged)[1] == "unsanctioned"

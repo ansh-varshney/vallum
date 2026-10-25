@@ -290,6 +290,23 @@ def test_a_rollback_is_done_when_visitors_get_the_old_revision():
                         sleep=lambda s: t.update(now=t["now"] + s), clock=lambda: t["now"]) is False
 
 
+def test_a_promotion_is_confirmed_on_the_live_app_and_resent_once(monkeypatch):
+    """r-0017 said 'live for everyone' while the 50% split served for another 50 s."""
+    from vallum.drive import __main__ as drive
+
+    sent, answers = [], iter([False, True])
+
+    class CR:
+        def set_traffic(self, traffic):
+            sent.append(traffic)
+
+    d = drive.Drive.__new__(drive.Drive)
+    d.cr, d.url = CR(), "https://x"
+    monkeypatch.setattr(drive, "wait_serving", lambda url, rev: next(answers))
+    assert d.confirm_live([{"revisionName": "new", "percent": 100}], "new") is True
+    assert len(sent) == 2                                         # not confirmed at first: sent once more
+
+
 def test_watchdog_recovers_a_crashed_drive_at_once():
     from vallum.patrol.watchdog import decide
 

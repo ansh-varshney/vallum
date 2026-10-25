@@ -43,12 +43,16 @@ GitLab Duo Code Review runs on every MR with instructions generated from the Rul
    pipeline) picks the next ready MR by priority, rebases it, waits for a fresh pipeline on that exact commit,
    runs all **12 Gatekeeper rules**, records the commit as sanctioned, gives the owner's approval that the MR
    approval rule needs, and merges pinned to that SHA.
-4. The **main pipeline** starts with the **deploy provenance gate** (refuses commits that skipped the Merge Desk),
+4. The **main pipeline** starts with the **deploy provenance gate** (refuses commits that skipped the Merge Desk;
+   a push is judged by `main`'s policy from before it, so no push can rewrite the rule that judges it),
    builds the image into Artifact Registry and runs the **test drive** on Cloud Run: deploy with 0% traffic, step 0
    on the private address, then the tier's traffic steps (Standard: 10% → 50% → 100%) while simulated visitors
-   play the users. Kept means promote; broken or unclear means **instant rollback**.
+   play the users. Kept means promote; broken or unclear means **instant rollback**. Every visit names the
+   revision that served it, and promotions and rollbacks are confirmed on the live app (15 answers in a row from
+   the target revision), because Cloud Run reports a new split up to minutes after it applies it.
 5. The **Notifier** keeps one live status comment on the MR, alerts the change owner, and mirrors the state
-   store into the **Ledger** issue. The **Watchdog** undoes anything left half-done.
+   store into the **Ledger** issue. The **Watchdog** undoes anything left half-done, at once if the test-drive
+   job has already ended.
 
 Emergency: run the manual job **`rollback-now`** in any `main` pipeline.
 
