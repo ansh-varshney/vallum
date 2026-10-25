@@ -36,6 +36,29 @@ def log(msg: str):
     print(f"[drive {utcnow().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def wait_serving(url: str, revision: str, streak: int = 15, timeout: float = 90, get=None, sleep=time.sleep,
+                  clock=time.monotonic) -> bool:
+    """A rollback is done when visitors get the old revision: 15 answers in a row from it. Cloud Run's own report
+    of a new split lags minutes behind the switch, so the time is measured on the live app."""
+    if get is None:
+        import httpx
+
+        def get(u):
+            return httpx.get(u, timeout=5).headers.get("x-revision")
+    end, seen = clock() + timeout, 0
+    while clock() < end:
+        try:
+            rev = get(url + "/health")
+        except Exception:
+            rev = None
+        seen = seen + 1 if rev == revision else 0
+        if seen >= streak:
+            return True
+        sleep(0.3)
+    log(f"could not confirm {revision} serves every visitor within {timeout:.0f}s")
+    return False
+
+
 def step0_seconds(seconds: float, rates: dict, star_need: int, warmup_s: float = 2.0) -> float:
     """Long enough for app-wide promises (route '*') too: r-0007 was refused with 109 of 160 samples because
     step 0 only planned for the feature's own routes."""
@@ -132,22 +155,8 @@ class Drive:
             log(f"started {key} flow ({via}) on {kind}/{iid}")
         return via
 
-    def wait_serving(self, revision: str, streak: int = 15, timeout: float = 90) -> bool:
-        """The rollback is done when visitors get the old revision: 15 answers in a row from it."""
-        import httpx
-
-        end, seen = time.monotonic() + timeout, 0
-        while time.monotonic() < end:
-            try:
-                rev = httpx.get(self.url + "/health", timeout=5).headers.get("x-revision")
-            except Exception:
-                rev = None
-            seen = seen + 1 if rev == revision else 0
-            if seen >= streak:
-                return True
-            time.sleep(0.3)
-        log(f"could not confirm {revision} serves every visitor within {timeout:.0f}s")
-        return False
+    def wait_serving(self, revision: str) -> bool:
+        return wait_serving(self.url, revision)
 
     def spend(self, samples: list[dict], label: str, new_rev: str | None = None):
         """Every simulated visit during a traffic step is a visit; the bad ones the new revision served spend
@@ -632,6 +641,7 @@ def rollback_now() -> int:
         store.set_release(last_good=target, previous_good=history[1:])
     t0 = time.monotonic()
     cr.set_traffic([{"revisionName": target, "percent": 100}])
+    wait_serving(config.service_url(pol), target)
     took = time.monotonic() - t0
     who = os.environ.get("GITLAB_USER_LOGIN", "someone")
     rid = rel.get("release_id") or "manual"

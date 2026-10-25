@@ -43,6 +43,8 @@ class Watcher:
             return False
         changed = [iid for iid, fp in now.items() if before.get(iid) != fp]
         if not changed:
+            if self.store.doc(DOC).get("kick_pending"):
+                self.kick_or_defer()
             return False
         self.store.update(DOC, lambda cur: {**cur, "mrs": now})
         for iid in changed:
@@ -50,8 +52,17 @@ class Watcher:
             if old and old[2] and not now[iid][2]:
                 self.hold_released(int(iid))
         self.log(f"watch: change on {', '.join('!' + i for i in changed)}")
-        self.kick_desk()
+        self.kick_or_defer()
         return True
+
+    def kick_or_defer(self) -> str:
+        """A change seen when a kick isn't allowed yet (too soon, or a desk run that began before it) waits for a
+        later tick instead of being dropped (seen live: GitLab Duo's review of !16 landed 90 s after a kick and
+        nothing re-ran the desk)."""
+        out = self.kick_desk()
+        pending = out in ("too soon", "desk already running")
+        self.store.update(DOC, lambda cur: {**cur, "kick_pending": pending})
+        return out
 
     def pipeline_status(self, iid: int) -> str | None:
         """The MR's latest pipeline (a failure or a pass must wake the desk even if the merge state is unchanged)."""

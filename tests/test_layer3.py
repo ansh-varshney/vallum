@@ -278,6 +278,18 @@ def test_a_small_first_step_carries_a_promise_still_collecting():
     assert judge.overall([{"verdict": judge.BROKEN, "severity": "blocker"}], "core", 120, 120, True, carry=True) == judge.BROKEN
 
 
+def test_a_rollback_is_done_when_visitors_get_the_old_revision():
+    from vallum.drive.__main__ import wait_serving
+
+    answers = iter(["new"] * 5 + ["old"] * 3 + ["new"] + ["old"] * 20)
+    t = {"now": 0.0}
+    ok = wait_serving("https://x", "old", get=lambda u: next(answers), sleep=lambda s: t.update(now=t["now"] + s),
+                      clock=lambda: t["now"])
+    assert ok and round(t["now"], 1) == round(0.3 * 23, 1)          # 15 in a row only after the last stray answer
+    assert wait_serving("https://x", "old", timeout=3, get=lambda u: "new",
+                        sleep=lambda s: t.update(now=t["now"] + s), clock=lambda: t["now"]) is False
+
+
 def test_watchdog_recovers_a_crashed_drive_at_once():
     from vallum.patrol.watchdog import decide
 
@@ -409,6 +421,11 @@ def test_watcher_acknowledges_a_released_hold_and_runs_the_desk_at_once():
     clock["t"] += 300
     gl.mrs[0]["sha"] = "c"
     assert w.tick() is True and len(gl.retried) == 1              # the desk is already running
+    gl.jobs[0]["status"] = "success"
+    clock["t"] += 15
+    assert w.tick() is False and len(gl.retried) == 2             # the deferred change still wakes the desk
+    clock["t"] += 300
+    assert w.tick() is False and len(gl.retried) == 2             # once
 
 
 def test_a_finished_pipeline_wakes_the_desk():
