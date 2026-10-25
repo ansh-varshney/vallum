@@ -3,7 +3,8 @@ is a reason to roll back.
 
 KEPT        within limits with enough data
 COLLECTING  not enough visits yet (wait up to twice the watch time)
-AT_RISK     close to the limit, or still too little data at the end: rollback (safe default)
+AT_RISK     close to the limit, or still too little data at the end: rollback (safe default; at a first step
+            under 10% too little data is carried to the next step instead)
 BROKEN      over the limit and at least 20% worse than the old revision: rollback
 """
 
@@ -53,10 +54,11 @@ def overall(rows: list[dict], tier: str, elapsed: float, watch: float, final: bo
     if any(r["verdict"] == AT_RISK for r in blocking):
         return AT_RISK
     if any(r["verdict"] == COLLECTING for r in blocking):
-        if carry and final:
-            return KEPT          # not enough visits at this small step: the next step judges it
         if elapsed >= 2 * watch:
-            return AT_RISK
+            # still too few visits after twice the watch: at a small first step the next step judges it; a promise
+            # can only be found broken once it has its sample, so carrying any earlier made the 1% step judge
+            # almost nothing (r-0017: eight promises carried at 120 s)
+            return KEPT if carry else AT_RISK
         return COLLECTING
     return KEPT if final or elapsed >= watch else COLLECTING
 

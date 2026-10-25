@@ -272,7 +272,9 @@ def test_a_small_first_step_carries_a_promise_still_collecting():
     from vallum.drive import judge
 
     rows = [{"verdict": judge.COLLECTING, "severity": "blocker"}]
-    assert judge.overall(rows, "core", 120, 120, final=True, carry=True) == judge.KEPT
+    # r-0017: carrying at the end of the watch carried eight promises at 1%; they keep collecting until twice the watch
+    assert judge.overall(rows, "core", 120, 120, final=True, carry=True) == judge.COLLECTING
+    assert judge.overall(rows, "core", 240, 120, final=True, carry=True) == judge.KEPT
     assert judge.overall(rows, "core", 120, 120, final=True) == judge.COLLECTING
     assert judge.overall(rows, "core", 240, 120, final=True) == judge.AT_RISK
     assert judge.overall([{"verdict": judge.BROKEN, "severity": "blocker"}], "core", 120, 120, True, carry=True) == judge.BROKEN
