@@ -15,7 +15,7 @@ instructions:
   - app/features/**
   instructions: |
     - Every feature change carries a Feature Card in `promises/features/` with every promise type its kind requires.
-    - Every new behavior promise must fail on `main` and pass on the branch (the fail-first check).
+    - Every new behavior promise must fail on `main` and pass on the branch (the fail-first check). A behavior
     - Each feature lives in its own module, `app/features/<name>.py`. Nobody edits `app/main.py` for a feature.
     - Every new user-facing feature ships behind a kill switch named on its card.
     - Every route of a new feature depends on flags.require("<flag>").

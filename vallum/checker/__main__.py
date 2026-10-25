@@ -26,6 +26,16 @@ def new_behavior_promises(branch: cardlib.CardSet, main: cardlib.CardSet) -> lis
             if (p.feature, p.id) not in old_ids and p.type == "behavior" and p.style == "steps"]
 
 
+FIX_KINDS = ("bug-fix", "security-fix", "performance")
+
+
+def guards_allowed(cards, rows) -> bool:
+    """Guards alone prove nothing new, so they are only enough on a fix card (the bug is not a behavior)."""
+    features = {r["feature"] for r in rows}
+    kinds = {c.get("kind") for c in cards.cards.values() if c.get("feature") in features}
+    return bool(kinds) and kinds <= set(FIX_KINDS)
+
+
 def run(out: Path, fail_first: bool = True) -> dict:
     pol = config.policy(GitLab())
     retry_s = float(pol["judge"]["step_retry_s"])
@@ -77,14 +87,20 @@ def run(out: Path, fail_first: bool = True) -> dict:
                                 passed, detail = dsl.run_steps(main_client, p.data["steps"], API_KEY)
                                 ok_on_branch = next((r["verdict"] == "kept" for r in results
                                                      if r["id"] == p.id and r["feature"] == p.feature), False)
+                                guard = bool(p.data.get("guard"))
                                 row = {"id": p.id, "feature": p.feature, "failed_on_main": not passed,
-                                       "passed_on_branch": ok_on_branch, "main_detail": detail}
-                                row["ok"] = row["failed_on_main"] and row["passed_on_branch"]
+                                       "passed_on_branch": ok_on_branch, "main_detail": detail, "guard": guard}
+                                # a regression guard must hold on both; any other new promise must fail first
+                                row["ok"] = (passed and ok_on_branch) if guard else (not passed and ok_on_branch)
                                 ff_rows.append(row)
                 except RuntimeError as exc:
                     ff_note = f"could not run main for the fail-first check: {exc}"
                     ff_ok = False
             ff_ok = ff_ok and all(r["ok"] for r in ff_rows)
+            only_guards = ff_rows and all(r["guard"] for r in ff_rows)
+            if only_guards and not guards_allowed(branch, ff_rows):
+                ff_ok = False
+                ff_note += ": only guards; a new feature needs at least one promise that fails on main"
 
     summary = core.summarize(results)
     report = {

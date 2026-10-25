@@ -220,6 +220,22 @@ def test_carried_requests_are_reported_and_closed():
     assert len(drive.gl.edits) == 1                                # reported once
 
 
+def test_guard_promises_are_only_enough_for_fixes():
+    """Regression (!13): a slowdown fix needs a behavior promise (catalog) that cannot fail on main (fail-first)."""
+    from vallum import cards as cardlib
+    from vallum.checker.__main__ import guards_allowed
+
+    cs = cardlib.CardSet(cards={"redirect": {"feature": "redirect", "kind": "new-endpoint"},
+                                "redirect@6-redirect": {"feature": "redirect", "kind": "bug-fix"},
+                                "link-preview": {"feature": "link-preview", "kind": "ui-page"}})
+    assert guards_allowed(cardlib.CardSet(cards={"x": {"feature": "x", "kind": "bug-fix"}}), [{"feature": "x"}])
+    assert not guards_allowed(cs, [{"feature": "link-preview"}])
+    card = yaml.safe_load(CARD_WITH_WATCH)
+    card.update(issue=9, kind="bug-fix", priority="P0", flag=None)
+    card["promises"]["behavior"][0]["guard"] = True
+    assert [p for p in cardlib.validate(card, config.load_local("catalog.yaml")) if "guard" in p] == []
+
+
 def test_yellow_adds_the_extra_step():
     pol = policy()
     assert pol.steps("standard", "green") == [10, 50, 100]

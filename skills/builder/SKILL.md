@@ -32,7 +32,9 @@ promises:
   reliability: [<from the reliability guardian>]
   security: [<from the security guardian>]
 ```
-Paste the guardians' promises unchanged (fix only obvious syntax: literal values, `{rand-N}` for long strings).
+A fix for a bug that is not a behavior (a slowdown) can't have a behavior promise that fails on `main`: mark
+its behavior promise `guard: true` (it must pass on `main` and on the branch) and prove the fix with a speed
+promise. Paste the guardians' promises unchanged (fix only obvious syntax: literal values, `{rand-N}` for long strings).
 
 ## Never
 - Edit anything in the profile's `never_edit`, another feature's module, or any protected path (`vallum/`,

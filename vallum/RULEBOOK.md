@@ -18,7 +18,10 @@ This file is a protected path: only the owner changes it, through a merge reques
 
 ## 3. Quality
 - Every feature change carries a Feature Card in `promises/features/` with every promise type its kind requires.
-- Every new behavior promise must fail on `main` and pass on the branch (the fail-first check).
+- Every new behavior promise must fail on `main` and pass on the branch (the fail-first check). A behavior
+  promise marked `guard: true` is a regression guard instead: it must pass on both. Guards alone are enough only
+  for a fix whose bug is not a behavior (a slowdown, proven by its speed promise in the test drive); a new feature
+  always needs at least one promise that fails on `main`.
 - Each feature lives in its own module, `app/features/<name>.py`. Nobody edits `app/main.py` for a feature.
 - Every new user-facing feature ships behind a kill switch named on its card.
 
