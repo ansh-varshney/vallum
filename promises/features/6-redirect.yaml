@@ -1,0 +1,29 @@
+feature: redirect-old-links
+issue: 6
+kind: bug-fix
+tier: core
+priority: P0
+owns:
+  routes: ["GET /r/{code}"]
+  files: [tests/test_redirect.py]
+flag: null
+promises:
+  behavior:
+    - id: redirect-old-links-still-work
+      says: "Older links still redirect correctly (guard: the slowdown fix must not change where they go)"
+      steps:
+        - "POST /api/links {url: 'https://example.com/old-{rand}'} -> 201 => link"
+        - "GET /r/{link.code} -> 302 https://example.com/old-{rand}"
+      where: [mr, drive]
+      severity: major
+      guard: true
+watch:
+  - id: watch-redirect-old-links-latency
+    type: speed
+    says: "Popular, older links redirect quickly (the fix for the 350 ms backfill holds)"
+    measure: "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
+    where: [drive]
+    severity: blocker
+    raised_by: reviewer
+    concern: "Confirm the removed 350 ms backfill does not come back for popular, older links"
+    expires: after_release
