@@ -60,7 +60,7 @@ class GateContext:
     learned_writer: bool = False               # author is the Incident Commander's bot (may ADD learned promises)
     fingerprint: str | None = None             # the MR's own changes, stable across rebases
     agent_made: bool = False                   # any commit authored by a Vallum flow's service account
-    housekeeping: bool = False                 # docs-only MR made by code after a release (code map, expired watches)
+    housekeeping: bool = False                 # MR made by code after a release: code map and expired watch blocks only
     override_by: str | None = None             # a member used @vallum ship-anyway on this change
     agent_names: list = field(default_factory=list)
     deploy_service_text: str | None = None     # deploy/service.yaml on the branch, if changed

@@ -71,7 +71,7 @@ def agent_authors(gl, iid: int) -> list[str]:
 
 
 def is_housekeeping(gl, mr: dict, pol) -> bool:
-    """A docs-only MR made by code after a release: the label, no agent commits, only the code map and
+    """A housekeeping MR made by code after a release: the label, no agent commits, only the code map and
     Feature Cards changed, and the cards differ from main only in their expired watch promises."""
     if pol.label("housekeeping") not in mr.get("labels", []):
         return False

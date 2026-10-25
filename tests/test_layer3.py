@@ -775,10 +775,44 @@ def test_housekeeping_changes_only_when_needed(tmp_path):
     files = {"docs/vallum/CODEMAP.md": text, "promises/features/9-demo.yaml": CARD_WITH_WATCH}
     actions = housekeeping.changes(ROOT, ["promises/features/9-demo.yaml"], files.get)
     assert [a["file_path"] for a in actions] == ["promises/features/9-demo.yaml"]
+    assert actions[0]["dropped"] == ["demo-popular-fast"]
     shifted = re.sub(r" :(\d+)", lambda m: f" :{int(m.group(1)) + 3}", text)   # only line numbers moved
     shifted = re.sub(r", (\d+) lines\)", lambda m: f", {int(m.group(1)) + 1} lines)", shifted)
     assert housekeeping.changes(ROOT, [], {"docs/vallum/CODEMAP.md": shifted}.get) == []
     assert housekeeping.changes(ROOT, [], {}.get)[0]["action"] == "create"
+
+
+def test_housekeeping_map_never_lists_the_watch_it_drops(tmp_path):
+    """!15: the code map was generated before the expired watch was dropped, so it still listed it (GitLab Duo)."""
+    (tmp_path / "promises" / "features").mkdir(parents=True)
+    (tmp_path / "vallum").mkdir()
+    (tmp_path / "vallum" / "project.yaml").write_text("name: demo\n", encoding="utf-8")
+    (tmp_path / "promises" / "features" / "9-demo.yaml").write_text(CARD_WITH_WATCH, encoding="utf-8")
+    assert "demo-popular-fast" in codemap.generate(tmp_path)
+    actions = housekeeping.changes(tmp_path, ["promises/features/9-demo.yaml"],
+                                   {"promises/features/9-demo.yaml": CARD_WITH_WATCH}.get)
+    by_path = {a["file_path"]: a for a in actions}
+    assert "demo-popular-fast" not in by_path["docs/vallum/CODEMAP.md"]["content"]
+    assert by_path["promises/features/9-demo.yaml"]["dropped"] == ["demo-popular-fast"]
+
+
+def test_housekeeping_mr_names_what_expired_and_sends_no_extra_keys():
+    posts = []
+
+    class GL:
+        def open_mrs(self, label):
+            return []
+
+        def post(self, path, json=None):
+            posts.append((path, json))
+            return {"iid": 99}
+
+    actions = [{"action": "update", "file_path": "promises/features/9-demo.yaml", "content": "x",
+                "dropped": ["demo-popular-fast"]}]
+    housekeeping.open_mr(GL(), config.policy(), "r-0099", actions)
+    commit, mr = posts[0][1], posts[1][1]
+    assert all(set(a) == {"action", "file_path", "content"} for a in commit["actions"])
+    assert "`demo-popular-fast` in `9-demo.yaml`" in mr["description"] and "docs-only" not in mr["description"]
 
 
 def test_card_schema_accepts_replay():

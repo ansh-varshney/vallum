@@ -135,11 +135,13 @@ def count_tests(text: str) -> int:
 
 
 # ------------------------------------------------------------------ cards
-def load_cards(root: Path) -> list[dict]:
-    cards = []
+def load_cards(root: Path, overrides: dict | None = None) -> list[dict]:
+    """The Feature Cards; `overrides` maps a card path to the text it will have (housekeeping drops watch blocks)."""
+    cards, overrides = [], overrides or {}
     for p in sorted((root / "promises" / "features").glob("*.yaml")) if (root / "promises" / "features").exists() else []:
+        rel = p.relative_to(root).as_posix()
         try:
-            card = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            card = yaml.safe_load(overrides[rel] if rel in overrides else p.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError:
             continue
         ids = {t: [x.get("id") for x in (card.get("promises") or {}).get(t) or []] for t in (card.get("promises") or {})}
@@ -151,13 +153,13 @@ def load_cards(root: Path) -> list[dict]:
 
 
 # ------------------------------------------------------------------ render
-def generate(root: Path) -> str:
+def generate(root: Path, card_overrides: dict | None = None) -> str:
     root = Path(root)
     profile = load_profile(root)
     ignore = list(profile.get("ignore") or [])
     src = files_under(root, list(profile.get("source_dirs") or []), ignore)
     tests = files_under(root, list(profile.get("test_dirs") or []), ignore)
-    cards = load_cards(root)
+    cards = load_cards(root, card_overrides)
     owner = {}
     for c in cards:
         for f in c["files"]:

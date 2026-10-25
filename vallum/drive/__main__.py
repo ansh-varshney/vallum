@@ -218,7 +218,7 @@ class Drive:
                 log(f"could not report the carried request !{mr}: {exc}")
 
     def housekeeping(self, info: dict):
-        """Refresh the code map and drop the watch promises that expired with this release (one docs-only MR)."""
+        """Refresh the code map and drop the watch promises that expired with this release (one housekeeping MR)."""
         names = set(info.get("features") or []) | set(info.get("touched") or [])
         paths = [self.cards.paths[n] for n in names if n in self.cards.paths]
         try:
@@ -436,8 +436,10 @@ class Drive:
             self.audit(rid, {"by": "drive", "step": pct, "verdict": verdict, "visits": len(samples)})
             if verdict != judge.KEPT:
                 return self.rollback(info, new_rev, old_rev, pct, verdict, rows)
-            self.status(mr_iid, f"{pct}%", "done", note=f"{len(samples)} visits")
-            self.store.event("step", f"{rid} {pct}% kept", release_id=rid)
+            carried = [r["id"] for r in rows if r.get("verdict") == judge.COLLECTING]
+            later = f"; {', '.join(carried)} still collecting, judged at the next step" if carried else ""
+            self.status(mr_iid, f"{pct}%", "done", note=f"{len(samples)} visits" + (f", {len(carried)} carried" if carried else ""))
+            self.store.event("step", f"{rid} {pct}% kept{later}", release_id=rid)
         return self.promote(info, new_rev, old_rev)
 
     async def watch(self, codes, key, rates, new_rev, old_rev, metric, tier, watch, carry=False):
