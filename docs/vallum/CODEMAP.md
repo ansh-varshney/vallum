@@ -25,7 +25,7 @@ A link shortener for small businesses: create short links, redirect visitors, se
 | links | standard | new-endpoint | `POST /api/links`<br>`GET /api/links/{code}`<br>`DELETE /api/links/{code}` | `app/features/links.py` | - | behavior: link-create-read, link-delete; reliability: link-api-reliable; security: link-create-needs-key, link-http-only, link-url-well-formed; speed: link-details-fast |
 | redirect | core | new-endpoint | `GET /r/{code}` | `app/features/redirect.py` | - | behavior: redirect-works, redirect-unknown-404; reliability: redirect-reliable; security: redirect-rejects-odd-codes; speed: redirect-fast |
 | redirect-old-links | core | bug-fix | `GET /r/{code}` | `tests/test_redirect.py` | - | behavior: redirect-old-links-still-work |
-| status-page | standard | ui-page | `GET /status`<br>`GET /status/rules`<br>`GET /status/live.json` | `app/features/status.py`<br>`app/ui.py` | - | behavior: status-renders, status-shows-promises, status-rules-page, status-live-feed; security: status-no-secrets; speed: status-fast |
+| status-page | standard | ui-page | `GET /status`<br>`GET /status/{rest:path}` | `app/features/status.py` | - | behavior: status-forwards, status-rules-forward; security: status-no-secrets; speed: status-fast |
 | version | standard | new-endpoint | `GET /api/version` | `app/features/version.py` | version | behavior: version-shows-revision; reliability: version-reliable; security: version-no-secrets; speed: version-fast |
 
 ## Modules
@@ -43,17 +43,17 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - route `GET /health -> health()`
 - def `health(request) :9`
 
-### `app/features/home.py` (python, 151 lines) · feature **home**
+### `app/features/home.py` (python, 161 lines) · feature **home**
 - route `GET / -> home()`
-- def `home(request) :103`
+- def `home(request) :123`
 
 ### `app/features/link_exists.py` (python, 22 lines) · feature **link-exists**
 - route `GET /api/links/{code}/exists -> link_exists()`
 - def `link_exists(code, request) :16`
 
-### `app/features/link_preview.py` (python, 40 lines) · feature **link-preview**
+### `app/features/link_preview.py` (python, 42 lines) · feature **link-preview**
 - route `GET /p/{code} -> preview()`
-- def `preview(code, request) :33`
+- def `preview(code, request) :35`
 
 ### `app/features/links.py` (python, 77 lines) · feature **links**
 - route `POST /api/links -> create_link()`
@@ -69,25 +69,11 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - route `GET /r/{code} -> follow()`
 - def `follow(code, request) :15`
 
-### `app/features/status.py` (python, 508 lines) · feature **status-page**
+### `app/features/status.py` (python, 23 lines) · feature **status-page**
 - route `GET /status -> status_page()`
-- route `GET /status/live.json -> live_json()`
-- route `GET /status/rules -> rules_page()`
-- def `when(value) :50`
-- def `tiers_html(modes, window) :67`
-- def `release_text(release) :87`
-- def `queue_html(queue, project_url) :102`
-- def `release_html(release, meta, queue, breaker, project_url) :121`
-- def `features_html(public, switches) :163`
-- def `security_html(sec) :213`
-- def `events_html(events, project_url) :228`
-- def `overall(data, live) :245`
-- def `live_payload(store, data) :387`
-- def `render(data, revision, live) :394`
-- def `status_page(request) :436`
-- def `live_json(request) :444`
-- def `render_rules(docs, revision, project_url) :465`
-- def `rules_page(request) :502`
+- route `GET /status/{rest:path} -> status_subpage()`
+- def `status_page() :16`
+- def `status_subpage(rest) :21`
 
 ### `app/features/version.py` (python, 13 lines) · feature **version**
 - route `GET /api/version -> version()`
@@ -117,12 +103,10 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - def `log(severity, message) :22`
 - def `log_request(method, route, status, ms, revision) :26`
 
-### `app/ui.py` (python, 170 lines) · feature **status-page**
-- def `esc(value) :54`
+### `app/ui.py` (python, 64 lines) · feature **home**
+- def `esc(value) :48`
+- def `header() :52`
 - def `page(title, body) :58`
-- def `nav(active, revision) :66`
-- def `markdown(text, link_base) :93`
-- def `yaml_html(text) :157`
 
 ## Routes
 
@@ -137,8 +121,7 @@ A link shortener for small businesses: create short links, redirect visitors, se
 | `GET /p/{code}` | `app/features/link_preview.py` | link-preview |
 | `GET /r/{code}` | `app/features/redirect.py` | redirect |
 | `GET /status` | `app/features/status.py` | status-page |
-| `GET /status/live.json` | `app/features/status.py` | status-page |
-| `GET /status/rules` | `app/features/status.py` | status-page |
+| `GET /status/{rest:path}` | `app/features/status.py` | status-page |
 | `POST /api/aliases` | `app/features/custom_alias.py` | custom-alias |
 | `POST /api/links` | `app/features/links.py` | links |
 
@@ -156,7 +139,7 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - `tests/test_gitlab_client.py`: 2 test(s)
 - `tests/test_layer2.py`: 12 test(s)
 - `tests/test_layer3.py`: 71 test(s)
-- `tests/test_layer4.py`: 16 test(s)
+- `tests/test_layer4.py`: 17 test(s)
 - `tests/test_link_exists.py`: 12 test(s)
 - `tests/test_link_preview.py`: 10 test(s)
 - `tests/test_redirect.py`: 5 test(s)
