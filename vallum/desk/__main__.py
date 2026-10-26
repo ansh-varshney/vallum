@@ -371,6 +371,8 @@ class Desk:
                              or any(r.get("state") == "requested_changes" for r in reviewers)
                              or (review or {}).get("verdict") == "changes"
                              or (released and (review or {}).get("verdict") == "needs-human"))
+        if released and self.owner_decided(mr):
+            return None
         if changes_requested:
             if built_by_vallum:
                 goal = {"door": "A", "mode": "fix", "merge_request_iid": iid,
@@ -553,6 +555,32 @@ class Desk:
             return True
         return False
 
+    def owner_decided(self, mr: dict) -> bool:
+        """The owner answered a needs-human question and removed the label: the Ship flow takes the decision in fix
+        mode, once per release, even when the pipeline failed (!34: the failure was what the owner decided about,
+        so the desk sent the Medic, which can't change promises, and nobody acted on the decision)."""
+        target = f"{MR}-{mr['iid']}"
+        tl = self.store.timeline(target)
+        released = tl.get("released_at")
+        if tl.get("held_for") or not released or tl.get("fix_for") == released:
+            return False
+        review = verdicts.latest(self.gl.notes(MR, mr["iid"]), self.flows.bots()).get("review")
+        if not review or review.get("verdict") not in ("needs-human", "changes"):
+            return False
+        if not context.agent_authors(self.gl, mr["iid"]):
+            return False                              # a member's own MR: its author applies the decision
+        goal = {"door": "A", "mode": "fix", "merge_request_iid": mr["iid"],
+                "why": "The owner answered the needs-human question in a comment on this merge request; apply that "
+                       "decision and the Reviewer's open points."}
+        if not self.start_agent(mr, "fix", "ship", evidence.fingerprint(self.gl.mr_changes(mr["iid"])), goal):
+            return False
+        self.store.set_timeline(target, fix_for=released)
+        self.notify.status(MR, mr["iid"], "Review fixes", "running",
+                           now="You decided. Vallum's Builder is applying your decision, then the Reviewer checks it.",
+                           action="nothing.")
+        self.log(f"!{mr['iid']}: the owner decided; Ship flow in fix mode")
+        return True
+
     def send_medic(self, mr: dict, reason: str = "pipeline failed"):
         """A Vallum MR whose pipeline failed (or whose rebase conflicted): the Medic gets at most 2 attempts (B19)."""
         target = f"{MR}-{mr['iid']}"
@@ -661,7 +689,7 @@ class Desk:
         candidates.sort(key=lambda m: priority.queue_key(self.level(m), m.get("created_at")))
         self.save_queue(candidates, waiting, failed, paused, held, refused)
         for mr in failed:
-            if mr in held or self.escalated(mr):
+            if mr in held or self.escalated(mr) or self.owner_decided(mr):
                 continue
             self.send_medic(mr)
         for pos, mr in enumerate(candidates[1:], 2):

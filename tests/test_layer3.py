@@ -1194,3 +1194,38 @@ def test_step_zero_judges_each_promise_on_its_own_need():
     assert drive.promise_need(watch) < drive.promise_need(rel)
     assert drive.needs([watch, rel])["GET /r/{code}"] == max(2 * drive.promise_need(watch), drive.promise_need(rel))
 
+
+
+def test_an_owner_decision_goes_to_the_builder_not_the_medic(monkeypatch):
+    """Regression (!34): the owner answered a needs-human question and removed the label, but the pipeline had
+    failed, so the desk sent the Pipeline Medic (which can't change promises) and nobody acted on the decision."""
+    from vallum.desk.__main__ import Desk
+    from vallum.desk import __main__ as deskmod
+
+    class GL(LabelGL):
+        def notes(self, kind, iid, limit=500):
+            return [{"id": 77, "author": {"username": "ai-vallum-ship-gitlab-ai-hackathon"},
+                     "body": '🛡 Vallum: **Reviewer verdict** · needs-human\n```json\n{"verdict": "needs-human", "sha": "abc", '
+                             '"decision_needed": "404 or 422?", "options": ["404", "422"]}\n```',
+                     "created_at": "2026-10-26T16:35:18Z"}]
+
+        def mr_changes(self, iid):
+            return []
+
+    class Flows:
+        def bots(self):
+            return {"ai-vallum-ship-gitlab-ai-hackathon": "ship"}
+
+    desk = Desk.__new__(Desk)
+    desk.store, desk.pol, desk.notify, desk.gl, desk.flows = Store(MemoryState()), policy(), FakeNotify(), GL(), Flows()
+    desk.log = lambda m: None
+    started = []
+    desk.start_agent = lambda mr, kind, flow, fp, goal: started.append((kind, flow, goal["mode"])) or True
+    monkeypatch.setattr(deskmod.context, "agent_authors", lambda gl, iid: ["Vallum Builder"])
+    mr = {"iid": 34, "title": "Link age", "description": "", "labels": ["vallum"], "sha": "abc"}
+    assert desk.owner_decided(mr) is False                                     # nobody released anything yet
+    desk.hold_for_human(mr, "404 or 422?", ["404", "422"], note_id=77)
+    assert desk.escalated({**mr, "labels": ["vallum", "vallum::needs-human"]}) is True
+    assert desk.escalated(mr) is False                                         # the owner removed the label
+    assert desk.owner_decided(mr) is True and started == [("fix", "ship", "fix")]
+    assert desk.owner_decided(mr) is False and len(started) == 1               # once per release
