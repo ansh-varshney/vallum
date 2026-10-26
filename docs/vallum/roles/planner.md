@@ -8,3 +8,5 @@ Extra instructions for Vallum's Planner in this codebase, on top of `skills/plan
 - Tiers here: anything on the redirect path is Core; API endpoints and pages are Standard unless the issue says
   Experimental. A change to an existing feature keeps that feature's card and tier.
 - `app/main.py`, `app/store.py` and `app/security.py` are never edited by a feature; plan around them.
+- List every error case in the plan with its status, so the guardians agree: a malformed or unknown code in the
+  path answers 404; a bad request body 422; a duplicate 409; a missing or wrong key 401.

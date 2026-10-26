@@ -23,14 +23,17 @@ everything depends on (Core tier); link management is Standard; new extras start
 
 ## How to add a feature
 1. New module `app/features/<module>.py` with `router = APIRouter()`; one module per feature.
-2. Validate input with pydantic models and `field_validator` (bad input answers 422). Duplicates answer 409.
+2. Validate request bodies with pydantic models and `field_validator` (a bad body answers 422). Duplicates
+   answer 409. A code in the path that doesn't fit the code format, or doesn't exist, answers **404**, never
+   422 (like `GET /r/{code}` and `GET /p/{code}`).
    URLs must be `http://` or `https://`, at most 2048 characters, with a host, and no whitespace or control
    characters (copy the validator in `app/features/links.py`).
 3. Codes and aliases: letters, digits and dashes only, 1–64 characters, `fullmatch`. Never end a path segment
    you invent with the letter `z` at the top level (Cloud Run reserves paths like `/healthz`).
 4. Return the same public link shape as `links.py`: `{code, url, short_url, created_at}`.
 5. Tests in `tests/test_<module>.py` using the `client` fixture from `tests/conftest.py` and the header
-   `{"X-API-Key": "test-key"}`; include the flag-off case (expect 404).
+   `{"X-API-Key": "test-key"}`; include the flag-off case (expect 404) in the **tests**. It is never a promise:
+   the promise checker can't switch flags (code tests kill switches itself).
 6. Feature Card in `promises/features/<issue>-<feature>.yaml` (see `promises/features/base-links.yaml`).
 
 ## Promise examples that fit this app

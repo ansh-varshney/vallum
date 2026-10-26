@@ -52,7 +52,7 @@ gate:
   yellow_max_changed_lines: 200
 
 provenance:
-  allow_owner_push: true           # demo and after: only Merge Desk merges deploy (true during the build phase: owner pushes deployed, recorded as overrides)
+  allow_owner_push: false          # demo and after: only Merge Desk merges deploy (true during the build phase: owner pushes deployed, recorded as overrides)
 
 merge_desk: { pipeline_wait_min: 20, rebase_wait_s: 180 }
 
