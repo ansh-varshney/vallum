@@ -14,4 +14,4 @@ RUN useradd --create-home --uid 10001 vallum
 USER vallum
 
 # APP_MODULE=control.main:app runs the control room (the status site) from the same image
-CMD exec uvicorn ${APP_MODULE:-app.main:app} --host 0.0.0.0 --port ${PORT} --no-access-log
+CMD ["sh", "-c", "exec uvicorn ${APP_MODULE:-app.main:app} --host 0.0.0.0 --port ${PORT} --no-access-log"]

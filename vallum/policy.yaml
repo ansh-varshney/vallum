@@ -69,7 +69,7 @@ judge:
 simulate:
   links: 120                       # persistent "real" links, popularity follows a Zipf curve
   base_rps: 20
-  max_rps: 150
+  max_rps: 100                     # one CI runner sends ~107 req/s cleanly; at 133 every route on both revisions took 3-4 s (r-0032)
   step0_requests: 300
   mix: { "GET /r/{code}": 0.85, "GET /api/links/{code}": 0.08, "GET /health": 0.05, "POST /api/links": 0.02 }
 
