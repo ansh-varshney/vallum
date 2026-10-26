@@ -1,85 +1,100 @@
-"""The control room's look: a light, cream page with a floating header of tabs, one topic per page, and a small
-Markdown and YAML renderer for the read-only copies of the repo's rules. Everything is escaped before formatting,
-so state or repository text can never inject HTML."""
+"""The control room's look: an operations console, deliberately unlike the link app. A cool, light page with a side
+navigation (one topic per page), compact cards, stat tiles and tables, and a small Markdown and YAML renderer for the
+read-only copies of the repo's rules. Everything is escaped before formatting, so state or repository text can never
+inject HTML."""
 
 import html
 import re
 from datetime import datetime, timezone
 
-FONTS = ("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800"
-         "&family=JetBrains+Mono:wght@400;500&display=swap")
+FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700"
+         "&family=IBM+Plex+Mono:wght@400;500&display=swap")
+
+ICONS = {
+    "overview": '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>'
+                '<rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    "releases": '<path d="M4 17l6-6 4 4 6-6"/><path d="M14 9h6v6"/>',
+    "features": '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+    "allowance": '<path d="M4 16a8 8 0 1116 0"/><path d="M12 16l4-5"/>',
+    "security": '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/>',
+    "rules": '<path d="M5 4h9a4 4 0 014 4v12H9a4 4 0 01-4-4V4z"/><path d="M9 9h5M9 13h5"/>',
+    "out": '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/>',
+}
 
 TABS = (("overview", "/", "Overview"), ("releases", "/releases", "Releases"), ("features", "/features", "Features"),
-        ("allowance", "/allowance", "Allowance"), ("security", "/security", "Security"), ("rules", "/rules", "Rules"))
+        ("allowance", "/allowance", "Allowance"), ("security", "/security", "Security"), ("rules", "/rules", "Rules and code"))
 
 CSS = """
-:root{color-scheme:light;--bg:#f7f5ef;--surface:#fff;--soft:#eeebe3;--soft2:#f4f1ea;--line:#e4dfd3;--ink:#1a1915;
---ink2:#3b3933;--muted:#6f6a5f;--dark:#161512;--teal:#1d8a9f;--teal-soft:#dcf0f3;--lime:#d6ee5c;--lime-soft:#f0f7cf;
---good:#2c8653;--good-soft:#e1f1e6;--warn:#a87410;--warn-soft:#f7ecd0;--bad:#bf4630;--bad-soft:#f8e0d9;--info:#58688a;
---info-soft:#e7ebf3;--core:#1e5f74;--standard:#3a9fb4;--experimental:#9479c0;--r:24px;
---shadow:0 1px 2px rgba(40,32,16,.04),0 10px 30px rgba(40,32,16,.06);--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
-code,pre,.mono,.chip,.yaml{font-variant-ligatures:none}
+:root{color-scheme:light;--bg:#f3f5f9;--surface:#fff;--sunken:#f6f8fb;--line:#e3e8ef;--line2:#d5dce6;--ink:#0f172a;--ink2:#334155;
+--muted:#64748b;--brand:#4338ca;--brand-soft:#eef0ff;--brand-ink:#312e81;--good:#15803d;--good-soft:#e8f6ed;--warn:#b45309;
+--warn-soft:#fdf3e2;--bad:#c2261d;--bad-soft:#fdeceb;--info:#475569;--info-soft:#eef1f6;--core:#1d4ed8;--standard:#0f8a7e;
+--experimental:#a21caf;--r:12px;--shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.04);
+--mono:"IBM Plex Mono",ui-monospace,Consolas,monospace}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font:15.5px/1.6 Manrope,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
-body::before{content:"";display:block;height:6px;background:linear-gradient(90deg,#a5e2ec,#5ec2d4 45%,var(--lime))}
-a{color:var(--teal);text-decoration-thickness:1px;text-underline-offset:3px}
-h1,h2,h3{margin:0;letter-spacing:-.025em;line-height:1.15}
-.wrap{max-width:1200px;margin:0 auto;padding:0 20px}
-.top{max-width:1200px;margin:14px auto 0;padding:0 20px;position:sticky;top:10px;z-index:5}
-.bar{display:flex;align-items:center;gap:16px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);
-border-radius:22px;padding:10px 10px 10px 18px;box-shadow:var(--shadow)}
-.brand{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font-weight:800;font-size:19px;letter-spacing:-.03em;white-space:nowrap}
-.brand small{font-weight:600;font-size:12px;color:var(--muted);letter-spacing:0;padding:2px 8px;border-radius:999px;background:var(--soft2)}
-.tabs{display:flex;gap:2px;margin:0 auto;overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
-.tabs a{color:var(--muted);text-decoration:none;font-weight:600;font-size:14.5px;padding:8px 14px;border-radius:999px;white-space:nowrap}
-.tabs a:hover{color:var(--ink);background:var(--soft2)}.tabs a.on{color:var(--ink);background:var(--soft)}
-.cta{display:inline-flex;align-items:center;gap:8px;background:var(--dark);color:#fff;text-decoration:none;font-weight:700;font-size:14px;
-padding:10px 16px;border-radius:999px;white-space:nowrap}.cta:hover{background:#2b2a25}
-@media (max-width:480px){.brand small{display:none}}
-@media (max-width:900px){.bar{flex-wrap:wrap;padding:10px 10px 6px 14px;gap:8px}.tabs{order:3;width:100%;margin:0}.cta{margin-left:auto;padding:8px 13px}
-.top{position:static}}
-main{padding:46px 0 10px}
-.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;padding:6px 13px;border-radius:999px;background:var(--surface);border:1px solid var(--line)}
+body{margin:0;background:var(--bg);color:var(--ink);font:14.5px/1.55 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+code,pre,.mono,.chip,.yaml{font-variant-ligatures:none}
+a{color:var(--brand);text-decoration:none}a:hover{text-decoration:underline}
+h1,h2,h3{margin:0;line-height:1.25;letter-spacing:-.01em}
+.shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh;background:linear-gradient(90deg,var(--surface) 247px,var(--line) 247px,var(--line) 248px,var(--bg) 248px)}
+.side{position:sticky;top:0;height:100vh;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 14px}
+.logo{display:flex;align-items:center;gap:11px;color:var(--ink);padding:4px 8px 18px;text-decoration:none!important}
+.logo b{display:block;font-size:16px;font-weight:700}.logo small{display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.09em}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:8px;color:var(--ink2);font-weight:500;position:relative;text-decoration:none}
+.nav a svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:var(--muted)}
+.nav a:hover{background:var(--sunken)}.nav a.on{background:var(--brand-soft);color:var(--brand-ink);font-weight:600}
+.nav a.on svg{color:var(--brand)}.nav a.on::before{content:"";position:absolute;left:-14px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--brand)}
+.side .foot{margin-top:auto;display:flex;flex-direction:column;gap:10px}
+.health{border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;background:var(--sunken)}
+.health .t{display:flex;gap:8px;align-items:center;font-weight:600;color:var(--ink)}.health p{margin:4px 0 0;color:var(--muted);font-size:12.5px}
+.appbtn{display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line2);border-radius:8px;padding:9px 12px;color:var(--ink);font-weight:600;background:var(--surface)}
+.appbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.appbtn:hover{background:var(--sunken);text-decoration:none}
+.content{min-width:0;display:flex;flex-direction:column}
+main{padding:28px 32px 12px;max-width:1240px;width:100%}
+footer.foot2{padding:18px 32px 32px;color:var(--muted);font-size:12.5px;display:flex;gap:6px 16px;flex-wrap:wrap;max-width:1240px}footer.foot2 a{color:var(--muted)}
+@media (max-width:960px){.shell{grid-template-columns:minmax(0,1fr);background:var(--bg)}.side{min-width:0;position:sticky;top:0;z-index:5;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px 12px;gap:6px;border-right:0;border-bottom:1px solid var(--line)}
+.logo{padding:2px 6px}.nav{flex-direction:row;overflow-x:auto;width:100%;order:3;scrollbar-width:none}.nav::-webkit-scrollbar{display:none}
+.nav a{white-space:nowrap;padding:7px 10px}.nav a.on::before{display:none}.side .foot{margin:0 0 0 auto;flex-direction:row}.health{display:none}
+.appbtn{padding:6px 10px;font-size:13px}main{padding:20px 16px 8px}footer.foot2{padding:16px}}
+.phead{display:flex;gap:16px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;margin:0 0 20px}
+.phead h1{font-size:26px;font-weight:700}.phead p{margin:6px 0 0;color:var(--muted);max-width:720px}
+.crumb{font-size:13px;color:var(--muted);margin-bottom:6px}.crumb a{color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);min-width:0}
+.card>.hd{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--line)}
+.card>.hd h2{font-size:15px;font-weight:600}.card>.hd span{color:var(--muted);font-size:12.5px}.card>.bd{padding:16px 18px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid21{display:grid;grid-template-columns:1.6fr 1fr;gap:16px}
+@media (max-width:1060px){.grid2,.grid21{grid-template-columns:1fr}}
+.stack>*+*{margin-top:16px}
+.status{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);white-space:nowrap}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
-.dot.good{background:var(--good);box-shadow:0 0 0 3px var(--good-soft)}.dot.warn{background:var(--warn);box-shadow:0 0 0 3px var(--warn-soft)}
-.dot.bad{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}.dot.teal{background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
-.dot.info{background:var(--info)}
-.phead{margin:6px 0 26px}.phead h1{font-size:clamp(30px,4.2vw,46px);font-weight:800;margin:12px 0 10px}
-.phead p{color:var(--muted);font-size:17px;max-width:720px;margin:0}
-.crumb{font-size:14px;color:var(--muted)}.crumb a{color:var(--muted)}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px;box-shadow:var(--shadow)}
-.panel>h2,.h2{font-size:21px;font-weight:800;margin:0 0 4px}.panel .sub{color:var(--muted);font-size:14px;margin:0 0 16px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-@media (max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
-.stack>*+*{margin-top:20px}
-.pill{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;line-height:1.5;background:var(--soft2);color:var(--ink2)}
+.dot.good{background:var(--good)}.dot.warn{background:#d97706}.dot.bad{background:var(--bad)}.dot.teal,.dot.brand{background:var(--brand)}.dot.info{background:#94a3b8}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:6px;white-space:nowrap;line-height:1.6;background:var(--info-soft);color:var(--info)}
 .pill.good{color:var(--good);background:var(--good-soft)}.pill.warn{color:var(--warn);background:var(--warn-soft)}
-.pill.bad{color:var(--bad);background:var(--bad-soft)}.pill.info{color:var(--info);background:var(--info-soft)}
-.pill.teal{color:#13697a;background:var(--teal-soft)}.pill.lime{color:#4b5a07;background:var(--lime-soft)}
-.pill.core{color:#fff;background:var(--core)}.pill.standard{color:#fff;background:var(--standard)}.pill.experimental{color:#fff;background:var(--experimental)}
-.muted{color:var(--muted)}.small{font-size:13.5px}.mono{font-family:var(--mono);font-size:12.5px}
-.chip{display:inline-flex;font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:9px;background:var(--soft2);border:1px solid var(--line);color:var(--ink2)}
-.list{list-style:none;margin:0;padding:0}.list>li{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--line)}
-.list>li:first-child{border-top:0;padding-top:2px}
-.empty{color:var(--muted);background:var(--soft2);border-radius:16px;padding:16px 18px;margin:0}
-.note{border-radius:16px;padding:14px 18px;margin:0 0 20px;font-weight:600}.note.bad{background:var(--bad-soft);color:var(--bad)}
-.note.info{background:var(--teal-soft);color:#13697a}
-.more{font-weight:700;text-decoration:none;font-size:14px}
-footer.foot{max-width:1200px;margin:30px auto 0;padding:22px 20px 44px;color:var(--muted);font-size:13.5px;display:flex;gap:8px 18px;flex-wrap:wrap;border-top:1px solid var(--line)}
-footer.foot a{color:var(--muted)}
-.md h1{font-size:26px;margin:4px 0 12px}.md h2{font-size:20px;margin:26px 0 8px}.md h3{font-size:16px;margin:20px 0 6px}
-.md p,.md ul,.md ol{margin:0 0 10px}.md li{margin:3px 0}.md code{font-family:var(--mono);font-size:12.5px;background:var(--soft2);padding:1px 6px;border-radius:6px}
-.md pre,.yaml{font-family:var(--mono);font-size:12.5px;background:var(--soft2);border:1px solid var(--line);border-radius:16px;padding:16px;overflow:auto;line-height:1.55;margin:0}
-.md pre{margin:0 0 12px}.md pre code{background:none;padding:0}.md blockquote{margin:0 0 10px;padding:6px 14px;border-left:3px solid var(--teal);color:var(--muted)}
-.md table{border-collapse:collapse;margin:0 0 14px;font-size:13px;display:block;overflow:auto;max-width:100%;width:max-content}
-.md th,.md td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;max-width:380px;overflow-wrap:break-word;min-width:70px}
-.md td:last-child{min-width:260px}.md th{background:var(--soft2)}
-.yaml .k{color:#13697a;font-weight:500}.yaml .c{color:var(--muted);font-style:italic}.yaml .s{color:var(--good)}
-:focus-visible{outline:3px solid #9fd8e2;outline-offset:2px}
+.pill.bad{color:var(--bad);background:var(--bad-soft)}.pill.teal,.pill.brand{color:var(--brand-ink);background:var(--brand-soft)}.pill.lime{color:#3f6212;background:#ecfccb}
+.pill.core{color:var(--core);background:#e8efff}.pill.standard{color:var(--standard);background:#e2f5f2}.pill.experimental{color:var(--experimental);background:#fbe8fb}
+.muted{color:var(--muted)}.small{font-size:12.5px}.mono{font-family:var(--mono);font-size:12px}
+.chip{display:inline-flex;font-family:var(--mono);font-size:11.5px;padding:2px 7px;border-radius:6px;background:var(--sunken);border:1px solid var(--line);color:var(--ink2)}
+.table{width:100%;border-collapse:collapse;font-size:13.5px}
+.table th{text-align:left;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--sunken);padding:9px 14px;border-bottom:1px solid var(--line)}
+.table td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}.table tr:last-child td{border-bottom:0}
+.table tr.link{cursor:pointer}.table tr.link:hover td{background:#fafbfe}
+.empty{color:var(--muted);background:var(--sunken);border:1px dashed var(--line2);border-radius:10px;padding:14px 16px;margin:0}
+.note{border-radius:10px;padding:11px 14px;margin:0 0 16px;font-weight:500;border:1px solid}.note.bad{background:var(--bad-soft);color:var(--bad);border-color:#f7c9c5}
+.note.info{background:var(--brand-soft);color:var(--brand-ink);border-color:#dcdffe}
+.more{font-weight:600;font-size:13px}
+.md h1{font-size:22px;margin:4px 0 12px}.md h2{font-size:18px;margin:24px 0 8px}.md h3{font-size:15px;margin:18px 0 6px}
+.md p,.md ul,.md ol{margin:0 0 10px}.md li{margin:3px 0}.md code{font-family:var(--mono);font-size:12px;background:var(--sunken);border:1px solid var(--line);padding:0 5px;border-radius:5px}
+.md pre,.yaml{font-family:var(--mono);font-size:12px;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px 16px;overflow:auto;line-height:1.6;margin:0}
+.md pre{margin:0 0 12px}.md pre code{background:none;border:0;padding:0;color:inherit}.md blockquote{margin:0 0 10px;padding:6px 14px;border-left:3px solid var(--brand);color:var(--muted)}
+.md table{border-collapse:collapse;margin:0 0 14px;font-size:12.5px;display:block;overflow:auto;max-width:100%;width:max-content}
+.md th,.md td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top;max-width:380px;overflow-wrap:break-word;min-width:70px}
+.md td:last-child{min-width:260px}.md th{background:var(--sunken)}
+.yaml .k{color:#a5b4fc}.yaml .c{color:#94a3b8;font-style:italic}.yaml .s{color:#86efac}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 """
 
-MARK = ('<svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="10" fill="#161512"/>'
-        '<path d="M7 23V12h3.4v3.2h3.3V12h4.6v3.2h3.3V12H25v11z" fill="#d6ee5c"/></svg>')
+MARK = ('<svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4338ca"/>'
+        '<path d="M7 23V12h3.4v3.2h3.3V12h4.6v3.2h3.3V12H25v11z" fill="#fff"/></svg>')
 
 
 def esc(value) -> str:
@@ -102,27 +117,34 @@ def mode_tone(mode: str | None) -> str:
     return {"green": "good", "yellow": "warn", "red": "bad"}.get((mode or "green").lower(), "info")
 
 
-def page(title: str, active: str, body: str, *, app_url: str, links: dict | None = None, css: str = "",
-         script: str = "") -> str:
-    """The page shell: the header with one tab per topic, the body, and a footer with the sources."""
-    tabs = "".join(f'<a href="{href}" class="{"on" if key == active else ""}"'
-                   f'{" aria-current=page" if key == active else ""}>{label}</a>' for key, href, label in TABS)
+def icon(name: str) -> str:
+    return f'<svg viewBox="0 0 24 24" aria-hidden="true">{ICONS[name]}</svg>'
+
+
+def page(title: str, active: str, body: str, *, app_url: str, links: dict | None = None, health: tuple | None = None,
+         css: str = "", script: str = "") -> str:
+    """The console shell: side navigation with one entry per topic, the page, and a footer with the sources."""
+    nav = "".join(f'<a href="{href}" class="{"on" if key == active else ""}"{" aria-current=page" if key == active else ""}>'
+                  f'{icon(key)}{label}</a>' for key, href, label in TABS)
     links = links or {}
+    tone, text = health or ("info", "Status unknown")
     foot = ["Visitors are simulated by CI jobs during the hackathon."]
     if links.get("project_url"):
         foot.append(f'<a href="{esc(links["project_url"])}" rel="noopener">Source and pipelines on GitLab</a>')
     if links.get("ledger_url"):
         foot.append(f'<a href="{esc(links["ledger_url"])}" rel="noopener">The Ledger</a>')
-    foot.append("This site reads only public state and changes nothing.")
+    foot.append("Read-only: this site changes nothing.")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · Vallum control room</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="{FONTS}"><style>{CSS}{css}</style></head><body>
-<header class="top"><div class="bar"><a class="brand" href="/">{MARK}Vallum <small>control room</small></a>
-<nav class="tabs" aria-label="Sections">{tabs}</nav>
-<a class="cta" href="{esc(app_url)}/" rel="noopener">Open the app <span aria-hidden="true">↗</span></a></div></header>
-<main class="wrap">{body}</main>
-<footer class="foot">{"".join(f"<span>{f}</span>" for f in foot)}</footer>
+<link rel="stylesheet" href="{FONTS}"><style>{CSS}{css}</style></head><body><div class="shell">
+<aside class="side"><a class="logo" href="/">{MARK}<span><b>Vallum</b><small>Control room</small></span></a>
+<nav class="nav" aria-label="Sections">{nav}</nav>
+<div class="foot"><div class="health"><div class="t"><span class="dot {tone}"></span>{esc(text)}</div>
+<p>Agents propose, code decides.</p></div>
+<a class="appbtn" href="{esc(app_url)}/" rel="noopener">{icon("out")}Open the link app</a></div></aside>
+<div class="content"><main>{body}</main>
+<footer class="foot2">{"".join(f"<span>{f}</span>" for f in foot)}</footer></div></div>
 {f"<script>{script}</script>" if script else ""}</body></html>"""
 
 

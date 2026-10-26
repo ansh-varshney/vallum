@@ -410,9 +410,24 @@ class Drive:
         log("no app change in this push: nothing to deploy")
         return 0
 
+    APP_FILES = ("app/", "deploy/", "Dockerfile", "requirements.txt")
+
+    def app_changed(self) -> bool:
+        """Anything the app runs changed since the live code? The image also carries the control room, whose own
+        job deploys it; a control-room-only change has nothing to test-drive. Unclear means yes."""
+        live, sha = self.store.live_commit(self.pol["cloud_run"]["service"]), os.environ.get("CI_COMMIT_SHA")
+        if not live or not sha:
+            return True
+        try:
+            diffs = self.gl.compare(live, sha).get("diffs", [])
+        except Exception:
+            return True
+        files = {d.get(k) for d in diffs for k in ("new_path", "old_path")} - {None}
+        return any(f.startswith(self.APP_FILES) for f in files)
+
     def release(self) -> int:
         image = os.environ.get("IMAGE")
-        if not image:
+        if not image or not self.app_changed():
             return self.no_app_change()
         info = self.widen(self.identify())
         rid, mr_iid, tier = info["release_id"], info.get("mr_iid"), info["tier"]

@@ -53,7 +53,8 @@ def create_app(store=None) -> FastAPI:
         if d["public"].get("rolled_back"):
             body = ('<p class="note info">Production was rolled back on purpose to an earlier version; live checks of '
                     'newer features wait for the next release.</p>') + body
-        return HTMLResponse(ui.page(title, active, body, app_url=APP_URL, links=d["public"], css=views.CSS, script=script),
+        return HTMLResponse(ui.page(title, active, body, app_url=APP_URL, links=d["public"], health=views.overall(d, {}),
+                                    css=views.CSS, script=script),
                             status_code=status, headers={"Cache-Control": f"public, max-age={cache}"})
 
     def switches(d: dict) -> dict:

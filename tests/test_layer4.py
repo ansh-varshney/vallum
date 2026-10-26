@@ -52,7 +52,7 @@ def _data(**over):
 def test_control_room_pages_show_tiers_features_promises_and_events():
     data = _data()
     features = views.features_page(data["public"], {})
-    assert 'class="fcard core broken"' in features and "2 of 3 promises kept" in features and "1 broken" in features
+    assert 'fcard core broken"' in features and "2 of 3 promises kept" in features and "1 broken" in features
     assert 'href="/features/redirect"' in features and "behavior 1" in features
     card = views.feature_page(data["public"], {}, "redirect")
     assert "Broken in production" in card and "Kept in test drive r-0017 at 50%: 47 ms (limit 150 ms, n=626)" in card
@@ -160,7 +160,7 @@ def test_security_triage_decides_every_finding_and_opens_one_fix_issue_per_real_
     ledger = render_ledger({}, {}, {}, [], [], security=sec)
     assert "Security findings on main (triaged by code)" in ledger and "fix #77" in ledger
     page = views.security(sec, "")
-    assert '<div class="secbig">5</div>' in page and "1 real: fix issues opened" in page
+    assert '<span class="secbig">5</span>' in page and "fix issues opened for Vallum to build" in page
     assert "simulate/visitors.py" not in page                                              # counts only
     assert "triages scanner findings on its next run" in views.security({}, "")
 
@@ -375,7 +375,8 @@ def test_app_home_and_old_status_address_and_control_room_routes(monkeypatch):
     for path in ("/releases", "/features", "/features/redirect", "/allowance", "/security", "/rules", "/rules/policy", "/health"):
         assert room.get(path).status_code == 200, path
     assert room.get("/features/nope").status_code == 404 and room.get("/rules/nope").status_code == 404
-    assert 'class="on" aria-current=page>Features' in room.get("/features/redirect").text
+    assert 'href="/features" class="on" aria-current=page>' in room.get("/features/redirect").text
+    assert "Every live promise is kept" in overview.text or "promise is broken" in overview.text      # health in the side navigation
     for source in Path("control").glob("*.py"):
         assert "vallum_secrets" not in source.read_text(encoding="utf-8")           # the control room never reads secrets
 
@@ -415,3 +416,23 @@ def test_every_folder_the_image_copies_is_in_the_build_context():
     allowed = {line.strip()[1:].rstrip("/") for line in Path(".dockerignore").read_text().splitlines() if line.startswith("!")}
     copied = re.findall(r"^COPY (\S+) ", Path("Dockerfile").read_text(), flags=re.M)
     assert copied and all(src.rstrip("/") in allowed for src in copied), (copied, allowed)   # 023c173: control/ was left out
+
+
+def test_a_control_room_only_change_has_nothing_to_test_drive(monkeypatch):
+    from types import SimpleNamespace
+
+    from vallum.drive.__main__ import Drive
+
+    class GL:
+        def __init__(self, paths):
+            self.paths = paths
+
+        def compare(self, a, b):
+            return {"diffs": [{"new_path": p, "old_path": p} for p in self.paths]}
+
+    monkeypatch.setenv("CI_COMMIT_SHA", "new")
+    stub = lambda paths, live="old": SimpleNamespace(store=SimpleNamespace(live_commit=lambda s: live), gl=GL(paths),
+                                                    pol={"cloud_run": {"service": "vallum"}}, APP_FILES=Drive.APP_FILES)
+    assert not Drive.app_changed(stub(["control/views.py", "tests/test_layer4.py"]))
+    assert Drive.app_changed(stub(["control/ui.py", "app/features/home.py"]))
+    assert Drive.app_changed(stub(["Dockerfile"])) and Drive.app_changed(stub([], live=None))   # unclear means yes

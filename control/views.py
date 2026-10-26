@@ -42,8 +42,8 @@ def overall(data: dict, drive: dict) -> tuple[str, str]:
     public, meta = data.get("public") or {}, data.get("meta") or {}
     if meta.get("safe_mode"):
         return "bad", "Safe mode: nothing ships until a member resumes"
-    if drive.get("phase") in ("starting", "step0", "traffic"):
-        return "teal", f"Shipping {drive.get('release_id') or ''} now"
+    if drive.get("phase") in ("starting", "step0", "traffic") or (data.get("release") or {}).get("slot") == "driving":
+        return "brand", f"Shipping {drive.get('release_id') or (data.get('release') or {}).get('release_id') or ''} now"
     if any(p.get("live") == "broken" for f in (public.get("features") or {}).values() for p in f.get("promises") or []):
         return "bad", "A promise is broken in production"
     red = [t for t in TIERS if ((data.get("modes") or {}).get(t) or {}).get("mode") == "red"]
@@ -95,9 +95,14 @@ def features(public: dict, switches: dict | None = None) -> list[dict]:
 def switch_html(item: dict, words: str = "") -> str:
     flag = item["f"].get("flag")
     if not flag:
-        return ""
+        return '<span class="muted small">none (Core: rollback)</span>' if item["tier"] == "core" else '<span class="muted small">none</span>'
     return (f'<span class="switch{" off" if item["off"] else ""}" title="Kill switch {esc(flag)} (GitLab feature flag)">'
             f'<i aria-hidden="true"></i>{words}{"off" if item["off"] else "on"}</span>')
+
+
+def meter(kept: int, total: int, tone: str) -> str:
+    pct = round(100 * kept / total) if total else 0
+    return f'<div class="meter {tone}"><b style="width:{pct}%"></b></div>'
 
 
 def events_html(events: list[dict], project_url: str, limit: int) -> str:
@@ -110,19 +115,54 @@ def events_html(events: list[dict], project_url: str, limit: int) -> str:
         if incident.isdigit() and project_url:
             link = f' <a href="{esc(project_url)}/-/issues/{incident}">incident #{incident}</a>'
         kind = str(e.get("kind"))
-        rows.append(f'<li><span class="when">{esc(when(e.get("at")))}</span>'
-                    f'{pill(kind.replace("_", " ").replace("-", " "), EVENT_TONES.get(kind, "info"))}'
-                    f'<span>{esc(e.get("summary"))}{link}</span></li>')
-    return '<ul class="list events">' + "".join(rows) + "</ul>"
+        rows.append(f'<tr><td class="when">{esc(when(e.get("at")))}</td>'
+                    f'<td>{pill(kind.replace("_", " ").replace("-", " "), EVENT_TONES.get(kind, "info"))}</td>'
+                    f'<td>{esc(e.get("summary"))}{link}</td></tr>')
+    return ('<div class="tablewrap"><table class="table events"><thead><tr><th>When</th><th>Event</th><th>What happened</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
 def live_json(live: dict) -> str:
     return '<script type="application/json" id="live-data">' + json.dumps(live, default=str).replace("</", "<\\/") + "</script>"
 
 
-def phead(title: str, lead: str, eyebrow: str = "", tone: str = "info", crumb: str = "") -> str:
-    eb = f'<span class="eyebrow"><span class="dot {tone}"></span>{eyebrow}</span>' if eyebrow else ""
-    return f'<div class="phead">{crumb}{eb}<h1>{title}</h1><p>{lead}</p></div>'
+def phead(title: str, lead: str, status: str = "", tone: str = "info", crumb: str = "") -> str:
+    chip = f'<span class="status"><span class="dot {tone}"></span>{status}</span>' if status else ""
+    return f'<div class="phead"><div>{crumb}<h1>{title}</h1><p>{lead}</p></div>{chip}</div>'
+
+
+def card(title: str, body: str, sub: str = "", cls: str = "", raw: bool = False, attrs: str = "") -> str:
+    inner = body if raw else f'<div class="bd">{body}</div>'
+    return (f'<section class="card {cls}"{attrs}><div class="hd"><h2>{title}</h2>{f"<span>{sub}</span>" if sub else ""}</div>'
+            f'{inner}</section>')
+
+
+def kpi(label: str, value: str, sub: str, extra: str = "", ident: str = "", href: str = "") -> str:
+    tag = "a" if href else "div"
+    attrs = (f' href="{href}"' if href else "") + (f' id="{ident}"' if ident else "")
+    return (f'<{tag} class="kpi"{attrs}><span class="lbl">{label}</span>'
+            f'<span class="val">{value}</span><span class="sub">{sub}</span>{extra}</{tag}>')
+
+
+def lowest_tier(modes: dict) -> tuple[str, int, str]:
+    rows = []
+    for t in TIERS:
+        m = modes.get(t) or {}
+        rows.append((round(100 * max(0.0, min(1.0, float(m.get("allowance", 1.0))))), t, (m.get("mode") or "green").lower()))
+    left, tier, mode = min(rows)
+    return ("Whole app" if tier == "app" else tier.capitalize()), left, mode
+
+
+def tier_bars(modes: dict) -> str:
+    out = []
+    for t in TIERS:
+        m = modes.get(t) or {}
+        left = round(100 * max(0.0, min(1.0, float(m.get("allowance", 1.0)))))
+        mode = (m.get("mode") or "green").lower()
+        out.append(f'<div class="abar {mode_tone(mode)}"><span class="n">{"Whole app" if t == "app" else t.capitalize()}</span>'
+                   f'<span class="t"><b style="width:{left}%"></b></span><span class="p">{left}%</span>'
+                   f'{pill(mode.upper(), mode_tone(mode))}</div>')
+    return "".join(out)
 
 
 # ---------------------------------------------------------------- overview
@@ -135,62 +175,41 @@ FLOW = (("You", "Ask", "Move an issue to In progress, or open your own merge req
 
 
 def overview(data: dict, live: dict, switches: dict) -> str:
-    public, drive = data.get("public") or {}, live.get("drive") or {}
+    public, drive, modes = data.get("public") or {}, live.get("drive") or {}, data.get("modes") or {}
+    release, meta = data.get("release") or {}, data.get("meta") or {}
     tone, headline = overall(data, drive)
     items = features(public, switches)
-    total = sum(i["total"] for i in items)
-    kept = sum(i["kept"] for i in items)
+    total, kept = sum(i["total"] for i in items), sum(i["kept"] for i in items)
     broken = sum(i["broken"] for i in items)
-    dots = "".join(f'<span class="{i["tone"]}" title="{esc(i["name"])}: {i["kept"]} of {i["total"]} kept"></span>' for i in items)
-    promises_viz = (f'<div class="vbox center"><div class="big">{kept}<small> / {total}</small></div>'
-                    f'<div class="muted small">promises kept{f" · {broken} broken" if broken else ""}</div>'
-                    f'<div class="fdots">{dots}</div></div>') if items else '<div class="vbox center muted small">Published after the next Live Patrol.</div>'
-    promises_text = (f"{len(items)} features, each a Feature Card in the repo, checked before merge, in the test drive "
-                     "and in production.") if items else "Every feature is a Feature Card in the repo."
-
-    modes = data.get("modes") or {}
-    bars, worst = [], None
-    for t in TIERS:
-        m = modes.get(t) or {}
-        left = round(100 * max(0.0, min(1.0, float(m.get("allowance", 1.0)))))
-        mode = (m.get("mode") or "green").lower()
-        if mode == "red" and worst is None:
-            worst = t
-        bars.append(f'<div class="abar {mode_tone(mode)}"><span>{"Whole app" if t == "app" else t.capitalize()}</span>'
-                    f'<span class="t"><b style="width:{left}%"></b></span><span>{left}%</span></div>')
-    allowance_text = (f"{'The whole app' if worst == 'app' else worst.capitalize()} is Red: changes touching it are paused "
-                      "until the allowance recovers." if worst else "Every tier is within its allowance: shipping normally.")
-
-    sec = data.get("security") or {}
-    counts = sec.get("counts") or {}
-    if sec.get("at"):
-        chips = " ".join(pill(f"{counts[k]} {k}", t) for k, t, _ in DECISIONS if counts.get(k))
-        security_viz = (f'<div class="vbox center"><div class="big">{int(sec.get("open", 0))}</div>'
-                        f'<div class="muted small">open findings, each decided by code</div><div class="chips">{chips}</div></div>')
-        real = int(counts.get("real", 0))
-        security_text = (f"{real} real high or critical finding{'s' if real != 1 else ''}: fix issues opened." if real
-                         else "No real high or critical finding in the code we ship.")
-    else:
-        security_viz = '<div class="vbox center muted small">Triaged on the next Live Patrol.</div>'
-        security_text = "Every scanner finding gets a decision made by code."
-
+    name, left, mode = lowest_tier(modes)
+    sec, counts = data.get("security") or {}, (data.get("security") or {}).get("counts") or {}
+    breaker = public.get("breaker") or {}
+    facts = [f"Live checks {esc(when(public.get('checked_at')))}" if public.get("checked_at") else "Live checks after the next patrol",
+             "Safe mode on" if meta.get("safe_mode") else "Safe mode off",
+             f"Circuit breaker {len(meta.get('rollbacks') or [])} recent rollback{'s' if len(meta.get('rollbacks') or []) != 1 else ''}"
+             f" (limit {int(breaker.get('limit', 3))} in {float(breaker.get('hours', 6)):g} h)"]
+    kpis = "".join([
+        kpi("Now shipping", "Shipping" if release.get("slot") == "driving" else "Idle", release_text(release), ident="kpi-ship", href="/releases"),
+        kpi("Promises kept", f"{kept}<small> / {total}</small>" if items else "–",
+            f"{len(items)} features{f', {broken} broken' if broken else ''}" if items else "after the next Live Patrol",
+            meter(kept, total, "bad" if broken else "good") if items else "", href="/features"),
+        kpi("Lowest allowance", f"{left}%", f"{esc(name)} · {mode.upper()}", meter(left, 100, mode_tone(mode)), href="/allowance"),
+        kpi("Open findings", str(int(sec.get("open", 0))) if sec.get("at") else "–",
+            f"{int(counts.get('real', 0))} real · each decided by code" if sec.get("at") else "after the next Live Patrol", href="/security"),
+    ])
     flow = "".join(f'<li><span class="n">{n}</span><b>{esc(step)}</b><p>{esc(text)}</p><span class="who">{esc(who)}</span></li>'
                    for n, (who, step, text) in enumerate(FLOW, 1))
-    return f"""<section class="hero"><span class="eyebrow"><span class="dot {tone}"></span>{esc(headline)}</span>
-<h1>Every change is test-driven before it reaches you.</h1>
-<p>Vallum ships this link shortener by itself: agents propose, code decides, and every release meets a small share of
-visitors before everyone gets it.</p></section>
-<section class="tiles">
-<a class="tile" href="/releases"><h2>Now shipping.</h2><div class="viz" id="mini"><div class="vbox center muted small">{release_text(data.get("release") or {})}</div></div>
-<p id="mini-text">{release_text(data.get("release") or {})}</p><span class="go">Releases →</span></a>
-<a class="tile" href="/features"><h2>Promises kept.</h2><div class="viz">{promises_viz}</div><p>{esc(promises_text)}</p><span class="go">Features →</span></a>
-<a class="tile" href="/allowance"><h2>Mistake allowance.</h2><div class="viz"><div class="vbox">{"".join(bars)}</div></div><p>{esc(allowance_text)}</p><span class="go">Allowance →</span></a>
-<a class="tile" href="/security"><h2>Security.</h2><div class="viz">{security_viz}</div><p>{esc(security_text)}</p><span class="go">Security →</span></a>
-</section>
-<section class="panel" style="margin-top:22px"><h2>How a change ships</h2><p class="sub">Agents propose, code decides. One feature per release.</p><ol class="flow">{flow}</ol></section>
-<section class="panel" style="margin-top:20px"><h2>Latest activity</h2><p class="sub">Releases, rollbacks and incidents, newest first.</p>
-{events_html((data.get("recent") or {}).get("events", []), public.get("project_url") or "", 5)}
-<p style="margin:14px 0 0"><a class="more" href="/releases">All releases →</a></p></section>
+    return f"""{phead("Overview", "Vallum ships this link shortener by itself: agents propose, code decides, and every release meets a "
+                      "small share of visitors before everyone gets it.")}
+<section class="banner {tone}"><span class="dot {tone}"></span><div><b>{esc(headline)}</b><p>{" · ".join(facts)}</p></div></section>
+<div class="kpis">{kpis}</div>
+<div class="grid21" style="margin-top:16px">
+{card("Latest release", f'<div id="lane" class="lane compact"><p class="muted" style="margin:0">{release_text(release)}</p></div>', '<a class="more" href="/releases">Releases →</a>')}
+{card("Mistake allowance", tier_bars(modes), '<a class="more" href="/allowance">Details →</a>')}
+</div>
+<div style="margin-top:16px">{card("How a change ships", f'<ol class="flow">{flow}</ol>', "Agents propose, code decides. One feature per release.")}</div>
+<div style="margin-top:16px">{card("Latest activity", events_html((data.get("recent") or {}).get("events", []), public.get("project_url") or "", 6),
+                                   '<a class="more" href="/releases">All releases →</a>', raw=True)}</div>
 {live_json(live)}"""
 
 
@@ -199,10 +218,12 @@ def queue_html(queue: dict, project_url: str) -> str:
     entries = queue.get("entries")
     if entries is None:          # older Merge Desk runs stored plain lines
         items = queue.get("items") or []
-        return ('<ul class="list">' + "".join(f"<li>{esc(i)}</li>" for i in items[:8]) + "</ul>") if items else \
-            '<p class="empty">Nothing waiting.</p>'
+        if not items:
+            return '<div class="bd"><p class="empty">Nothing waiting.</p></div>'
+        return ('<div class="tablewrap"><table class="table"><tbody>' + "".join(f"<tr><td>{esc(i)}</td></tr>" for i in items[:8])
+                + "</tbody></table></div>")
     if not entries:
-        return '<p class="empty">Nothing waiting.</p>'
+        return '<div class="bd"><p class="empty">Nothing waiting.</p></div>'
     tones = {"P0": "bad", "P1": "warn", "P2": "info", "P3": "info"}
     rows = []
     for n, e in enumerate(entries[:8], 1):
@@ -210,9 +231,10 @@ def queue_html(queue: dict, project_url: str) -> str:
         label = f"!{iid} {esc(e.get('title'))}"
         title = f'<a href="{esc(project_url)}/-/merge_requests/{iid}">{label}</a>' if project_url else label
         state = esc(e.get("state", "")) + (f" · {esc(e['why'])}" if e.get("why") else "")
-        rows.append(f'<li><span class="qn">{n}</span>{pill(e.get("priority") or "P2", tones.get(e.get("priority"), "info"))}'
-                    f'<span>{title}<br><span class="muted small">{state}</span></span></li>')
-    return '<ul class="list queue">' + "".join(rows) + "</ul>"
+        rows.append(f'<tr><td class="num">{n}</td><td>{pill(e.get("priority") or "P2", tones.get(e.get("priority"), "info"))}</td>'
+                    f'<td>{title}</td><td class="muted">{state}</td></tr>')
+    return ('<div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Priority</th><th>Merge request</th><th>State</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
 def safety_html(meta: dict, breaker: dict) -> str:
@@ -226,12 +248,12 @@ def safety_html(meta: dict, breaker: dict) -> str:
             pass
     safe = meta.get("safe_mode")
     reason = f'<br><span class="small" style="color:var(--bad)">{esc(meta.get("safe_mode_reason") or "on")}</span>' if safe else ""
-    return f"""<ul class="list safety">
+    return f"""<ul class="list">
 <li><span class="dot {"bad" if safe else "good"}"></span><span><b>Safe mode {"ON" if safe else "off"}</b>{reason}<br>
 <span class="muted small">After too many rollbacks, no merges and no releases until a member resumes.</span></span></li>
 <li><span class="dot {"warn" if recent else "good"}"></span><span><b>Circuit breaker {recent} of {limit}</b> rollbacks in {hours:g} h<br>
 <span class="muted small">At {limit} rollbacks within {hours:g} hours, Safe mode turns on by itself.</span></span></li>
-<li><span class="dot teal"></span><span><b>Rollback in seconds</b><br>
+<li><span class="dot brand"></span><span><b>Rollback in seconds</b><br>
 <span class="muted small">A broken promise during a test drive moves every visitor back to the old version.</span></span></li></ul>"""
 
 
@@ -240,52 +262,58 @@ def releases(data: dict, live: dict) -> str:
     project_url = public.get("project_url") or ""
     active = release.get("slot") in ("driving", "merged", "gated")
     return f"""{phead("Releases", "Each release meets a private check first, then a growing share of visitors. Any broken "
-                     "promise rolls it back in seconds.", release_text(release), "teal" if active else "info")}
-<section id="lane" class="panel lane"><p class="muted" style="margin:0">{release_text(release)}</p></section>
-<div class="grid2" style="margin-top:20px">
-<section class="panel"><h2>Release queue</h2><p class="sub">Priority first, then age. One release at a time.</p>{queue_html(data.get("queue") or {}, project_url)}</section>
-<section class="panel"><h2>Safety nets</h2><p class="sub">What stops a bad release, by code.</p>{safety_html(data.get("meta") or {}, public.get("breaker") or {})}</section>
+                     "promise rolls it back in seconds.", release_text(release), "brand" if active else "info")}
+{card("Test drive", f'<div id="lane" class="lane"><p class="muted" style="margin:0">{release_text(release)}</p></div>', "live, updates by itself")}
+<div class="grid21" style="margin-top:16px">
+{card("Release queue", queue_html(data.get("queue") or {}, project_url), "priority first, then age; one release at a time", raw=True)}
+{card("Safety nets", safety_html(data.get("meta") or {}, public.get("breaker") or {}), "what stops a bad release, by code")}
 </div>
-<section class="panel" style="margin-top:20px"><h2>History</h2><p class="sub">Releases, rollbacks, refusals and incidents, newest first.</p>
-{events_html((data.get("recent") or {}).get("events", []), project_url, 20)}</section>
+<div style="margin-top:16px">{card("History", events_html((data.get("recent") or {}).get("events", []), project_url, 20),
+                                   "releases, rollbacks, refusals and incidents, newest first", raw=True)}</div>
 {live_json(live)}"""
 
 
 # ---------------------------------------------------------------- features
+def _type_rank(t) -> int:
+    return TYPE_ORDER.index(t) if t in TYPE_ORDER else len(TYPE_ORDER)
+
+
 def features_page(public: dict, switches: dict) -> str:
     items = features(public, switches)
     lead = ("Every feature is a Feature Card in the repo: what it promises, checked before every merge, during the "
-            "test drive and in production. Open a card to see its promises.")
+            "test drive and in production. Open a feature to see its promises.")
     if not items:
-        return phead("Features and their promises", lead) + '<p class="empty">The Live Patrol publishes the live features after its next run.</p>'
+        return phead("Features", lead) + '<p class="empty">The Live Patrol publishes the live features after its next run.</p>'
     counts = {}
     for i in items:
         counts[i["tier"]] = counts.get(i["tier"], 0) + 1
-    filters = f'<button type="button" class="on" data-tier="all">All {len(items)}</button>' + "".join(
-        f'<button type="button" data-tier="{t}">{t.capitalize()} {counts[t]}</button>' for t in ("core", "standard", "experimental") if counts.get(t))
-    cards = []
+    filters = f'<button type="button" class="on" data-tier="all">All <b>{len(items)}</b></button>' + "".join(
+        f'<button type="button" data-tier="{t}">{t.capitalize()} <b>{counts[t]}</b></button>'
+        for t in ("core", "standard", "experimental") if counts.get(t))
+    total, kept = sum(i["total"] for i in items), sum(i["kept"] for i in items)
+    rows = []
     for i in items:
-        f, pct = i["f"], round(100 * i["kept"] / i["total"]) if i["total"] else 0
+        f = i["f"]
         types = {}
         for p in i["promises"]:
             types[p.get("type")] = types.get(p.get("type"), 0) + 1
         chips = "".join(f"<span>{esc(t)} {n}</span>" for t, n in sorted(types.items(), key=lambda kv: _type_rank(kv[0])))
         issue = f.get("issue")
         origin = f"from issue #{int(issue)}" if issue and str(issue).isdigit() else "base feature"
-        broken = f'<span style="color:var(--bad)">{i["broken"]} broken</span>' if i["broken"] else ""
-        cards.append(
-            f'<a class="fcard {esc(i["tier"])}{" broken" if i["broken"] else ""}" data-tier="{esc(i["tier"])}" href="/features/{esc(i["name"])}">'
-            f'<div class="ftop">{pill(i["tier"].capitalize(), i["tier"])}{pill(f.get("priority") or "P2")}{switch_html(i)}</div>'
-            f'<h3>{esc(i["name"])}</h3><div class="kind">{esc(f.get("kind") or "")} · {origin}</div>'
-            f'<div class="kept"><span>{i["kept"]} of {i["total"]} promises kept</span>{broken}</div>'
-            f'<div class="meter {i["tone"]}"><b style="width:{pct}%"></b></div>'
-            f'<div class="types">{chips}</div><span class="open">View promises →</span></a>')
-    return (phead("Features and their promises", lead) + f'<div class="filters" role="group" aria-label="Filter by tier">{filters}</div>'
-            f'<div class="fgrid">{"".join(cards)}</div>')
-
-
-def _type_rank(t) -> int:
-    return TYPE_ORDER.index(t) if t in TYPE_ORDER else len(TYPE_ORDER)
+        broken = f' <span style="color:var(--bad)">· {i["broken"]} broken</span>' if i["broken"] else ""
+        rows.append(
+            f'<tr class="link fcard {esc(i["tier"])}{" broken" if i["broken"] else ""}" data-tier="{esc(i["tier"])}" data-href="/features/{esc(i["name"])}">'
+            f'<td><a class="fname" href="/features/{esc(i["name"])}">{esc(i["name"])}</a>'
+            f'<div class="muted small">{esc(f.get("kind") or "")} · {origin}</div><div class="types">{chips}</div></td>'
+            f'<td>{pill(i["tier"].capitalize(), i["tier"])} {pill(f.get("priority") or "P2")}</td>'
+            f'<td>{switch_html(i)}</td>'
+            f'<td class="kept"><span>{i["kept"]} of {i["total"]} promises kept{broken}</span>{meter(i["kept"], i["total"], i["tone"])}</td>'
+            f'<td class="go" aria-hidden="true">›</td></tr>')
+    table = ('<div class="tablewrap"><table class="table ftable"><thead><tr><th>Feature</th><th>Tier</th><th>Kill switch</th>'
+             f'<th>Promises</th><th></th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+    return (phead("Features", lead, f"{kept} of {total} promises kept", "good" if kept == total else "warn")
+            + f'<div class="filters" role="group" aria-label="Filter by tier">{filters}</div>'
+            + card("Live features", table, "click a row for its promises and card file", raw=True))
 
 
 def feature_page(public: dict, switches: dict, name: str) -> str | None:
@@ -294,34 +322,41 @@ def feature_page(public: dict, switches: dict, name: str) -> str | None:
         return None
     f, project_url = item["f"], public.get("project_url") or ""
     issue = f.get("issue")
-    origin = (f'<a href="{esc(project_url)}/-/work_items/{int(issue)}">from issue #{int(issue)}</a>'
-              if issue and str(issue).isdigit() and project_url else "a base feature")
-    routes = "".join(f'<span class="chip">{esc(r)}</span>' for r in f.get("routes") or [])
+    origin = (f'<a href="{esc(project_url)}/-/work_items/{int(issue)}">issue #{int(issue)}</a>'
+              if issue and str(issue).isdigit() and project_url else "base feature")
+    routes = "".join(f'<span class="chip">{esc(r)}</span>' for r in f.get("routes") or []) or '<span class="muted">none</span>'
     groups = {}
     for p, res in zip(item["promises"], item["results"]):
         groups.setdefault(p.get("type") or "other", []).append((p, res))
     where_words = {"mr": "merge request", "drive": "test drive", "live": "production"}
-    blocks = []
+    rows = []
     for t in sorted(groups, key=_type_rank):
-        rows = []
+        rows.append(f'<tr class="group"><td colspan="4">{esc(t)} · {len(groups[t])}</td></tr>')
         for p, (tone, text) in groups[t]:
-            extra = (pill("watch", "teal") if p.get("source") == "watch" else "") + (pill("learned", "lime") if p.get("source") == "learned" else "")
+            extra = (" " + pill("watch", "brand") if p.get("source") == "watch" else "") + (" " + pill("learned", "lime") if p.get("source") == "learned" else "")
             where = "".join(f'<span class="chip">{esc(where_words.get(w, w))}</span>' for w in p.get("where") or [])
-            rows.append(f'<li><span class="dot {tone}"></span><div><div><span class="pid">{esc(p.get("id"))}</span> '
-                        f'{pill(p.get("severity") or "", "bad" if p.get("severity") == "blocker" else "info")} {extra}</div>'
-                        f'<div class="says">{esc(p.get("says"))}</div><div class="res {tone}">{esc(text)}</div>'
-                        f'<div class="where">{where}</div></div></li>')
-        blocks.append(f'<div class="ptype"><h3>{esc(t)} · {len(rows)}</h3><ul class="list prom">{"".join(rows)}</ul></div>')
+            rows.append(f'<tr><td><span class="dot {tone}"></span></td><td><b class="pid">{esc(p.get("id"))}</b>{extra}'
+                        f'<div class="says">{esc(p.get("says"))}</div><div class="res {tone}">{esc(text)}</div></td>'
+                        f'<td>{pill(p.get("severity") or "", "bad" if p.get("severity") == "blocker" else "info")}</td>'
+                        f'<td><div class="where">{where}</div></td></tr>')
+    promises = ('<div class="tablewrap"><table class="table ptable"><thead><tr><th></th><th>Promise and latest result</th><th>Severity</th>'
+                f'<th>Checked in</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>') if rows else '<div class="bd"><p class="empty">No promises.</p></div>'
     card_file = f.get("path") or ""
     open_link = f'<a class="more" href="{esc(project_url)}/-/blob/main/{esc(card_file)}" rel="noopener">Open on GitLab ↗</a>' if project_url and card_file else ""
     crumb = f'<div class="crumb"><a href="/features">Features</a> / {esc(name)}</div>'
-    lead = f'{esc(f.get("kind") or "")} · {origin} · {item["kept"]} of {item["total"]} promises kept'
-    return f"""<div class="phead">{crumb}<h1>{esc(name)}</h1><p>{lead}</p>
-<div class="fhead">{pill(item["tier"].capitalize(), item["tier"])}{pill(f.get("priority") or "P2")}{switch_html(item, "kill switch ")}{routes}</div></div>
-<div class="dgrid"><section class="panel"><h2>Promises</h2><p class="sub">Grouped by type. Each says where it is checked.</p>{"".join(blocks) or '<p class="empty">No promises.</p>'}</section>
-<aside class="panel cardfile"><h2>Card file</h2><p class="sub"><span class="mono">{esc(card_file)}</span></p>
-{yaml_html(f.get("yaml") or "") if f.get("yaml") else '<p class="empty">Published with the next Live Patrol.</p>'}
-<p style="margin:14px 0 0">{open_link}</p></aside></div>"""
+    kpis = "".join([
+        kpi("Promises kept", f'{item["kept"]}<small> / {item["total"]}</small>', f'{item["broken"]} broken' if item["broken"] else "none broken",
+            meter(item["kept"], item["total"], item["tone"])),
+        kpi("Tier", pill(item["tier"].capitalize(), item["tier"]) + " " + pill(f.get("priority") or "P2"), esc(f.get("kind") or "")),
+        kpi("Kill switch", f'<span class="vt">{switch_html(item, "kill switch ")}</span>',
+            "a GitLab feature flag" if f.get("flag") else "Core features roll back instead"),
+        kpi("Origin", f'<span class="vt">{origin}</span>', routes),
+    ])
+    yaml_block = yaml_html(f.get("yaml") or "") if f.get("yaml") else '<p class="empty">Published with the next Live Patrol.</p>'
+    return f"""{phead(esc(name), f'{esc(f.get("kind") or "")} · {item["kept"]} of {item["total"]} promises kept', crumb=crumb)}
+<div class="kpis">{kpis}</div>
+<div class="dgrid" style="margin-top:16px">{card("Promises", promises, "grouped by type", raw=True)}
+<section class="card cardfile"><div class="hd"><h2>Card file</h2>{open_link}</div><div class="bd"><p class="mono muted" style="margin:0 0 10px">{esc(card_file)}</p>{yaml_block}</div></section></div>"""
 
 
 # ---------------------------------------------------------------- allowance
@@ -338,24 +373,25 @@ def allowance(data: dict) -> str:
         detail = (f"{bad} bad of {visits:,} visits; {round(float(allowed))} allowed{span}" if visits and allowed is not None
                   else f"No visits{span}")
         label = "Whole app" if t == "app" else t.capitalize()
-        cards.append(f'<div class="tcard"><div class="ring {mode_tone(mode)}" style="--p:{left}" role="img" '
-                     f'aria-label="{esc(label)}: {left}% of the allowance left"><span><b>{left}%</b><small>left</small></span></div>'
-                     f'<h3>{esc(label)} {pill(mode.upper(), mode_tone(mode))}</h3><p>{esc(detail)}</p>'
-                     f'<p><b style="color:var(--ink2)">{esc(MODE_WORDS.get(mode, ""))}</b></p></div>')
+        cards.append(f'<div class="card tcard"><div class="tt"><h3>{esc(label)}</h3>{pill(mode.upper(), mode_tone(mode))}</div>'
+                     f'<div class="gauge {mode_tone(mode)}" style="--p:{left}" role="img" aria-label="{esc(label)}: {left}% of the allowance left">'
+                     f'<span><b>{left}%</b><small>left</small></span></div>'
+                     f'<p class="small">{esc(detail)}</p><p class="mw">{esc(MODE_WORDS.get(mode, ""))}</p></div>')
     lead = ("Each tier may afford a few bad visits per hour. A visit is bad if it fails or is twice as slow as its "
             "promise. Spend the allowance and the tier's mode changes, by code.")
-    modes_list = """<ul class="list modes">
-<li><span class="dot good"></span><span><b>Green</b><br><span class="muted small">Ship normally.</span></span></li>
-<li><span class="dot warn"></span><span><b>Yellow</b> (Standard and the whole app)<br><span class="muted small">An extra 25% test-drive step and a size cap on changes.</span></span></li>
-<li><span class="dot bad"></span><span><b>Red</b><br><span class="muted small">New work touching the tier pauses with the reason; P0 and P1 fixes still go through.</span></span></li></ul>"""
-    thresholds = """<ul class="list modes">
-<li><span class="pill core">Core</span><span class="small">Red below 50%; back to Green above 65%. No Yellow: the gap stops flickering.</span></li>
-<li><span class="pill standard">Standard</span><span class="small">Yellow below 50%, Red below 10%; back to Yellow above 25% and Green above 60%.</span></li>
-<li><span class="pill experimental">Experimental</span><span class="small">Always Green; it can still roll back.</span></li>
-<li><span class="pill">Whole app</span><span class="small">Like Standard, against the service's target.</span></li></ul>"""
-    return f"""{phead("Mistake allowance", lead)}<div class="tiers4">{"".join(cards)}</div>
-<div class="grid2"><section class="panel"><h2>What the modes do</h2><p class="sub">Set by code from the allowance, never by an agent.</p>{modes_list}</section>
-<section class="panel"><h2>When modes change</h2><p class="sub">Separate thresholds to enter and to leave.</p>{thresholds}</section></div>"""
+    modes_table = """<div class="tablewrap"><table class="table"><thead><tr><th>Mode</th><th>What happens</th></tr></thead><tbody>
+<tr><td><span class="pill good">GREEN</span></td><td>Ship normally.</td></tr>
+<tr><td><span class="pill warn">YELLOW</span></td><td>Standard and the whole app only: an extra 25% test-drive step and a size cap on changes.</td></tr>
+<tr><td><span class="pill bad">RED</span></td><td>New work touching the tier pauses with the reason; P0 and P1 fixes still go through.</td></tr></tbody></table></div>"""
+    thresholds = """<div class="tablewrap"><table class="table"><thead><tr><th>Tier</th><th>Enter</th><th>Leave</th></tr></thead><tbody>
+<tr><td><span class="pill core">Core</span></td><td>Red below 50%</td><td>Green above 65% (no Yellow: the gap stops flickering)</td></tr>
+<tr><td><span class="pill standard">Standard</span></td><td>Yellow below 50%, Red below 10%</td><td>Yellow above 25%, Green above 60%</td></tr>
+<tr><td><span class="pill experimental">Experimental</span></td><td>Always Green</td><td>It can still roll back</td></tr>
+<tr><td><span class="pill">Whole app</span></td><td colspan="2">Like Standard, against the service's target</td></tr></tbody></table></div>"""
+    name, left, mode = lowest_tier(modes)
+    return f"""{phead("Mistake allowance", lead, f"Lowest: {esc(name)} {left}%", mode_tone(mode))}<div class="tiers4">{"".join(cards)}</div>
+<div class="grid2" style="margin-top:16px">{card("What the modes do", modes_table, "set by code, never by an agent", raw=True)}
+{card("When modes change", thresholds, "separate thresholds to enter and to leave", raw=True)}</div>"""
 
 
 # ---------------------------------------------------------------- security
@@ -365,16 +401,26 @@ def security(sec: dict, project_url: str) -> str:
     if not sec.get("at"):
         return phead("Security", lead) + '<p class="empty">The Live Patrol triages scanner findings on its next run.</p>'
     counts, total = sec.get("counts") or {}, int(sec.get("open", 0))
-    rows = "".join(f'<li><span class="n">{int(counts.get(k, 0))}</span><span>{pill(k, tone)}<br>'
-                   f'<span class="muted small">{esc(text)}</span></span></li>' for k, tone, text in DECISIONS)
-    report = (f'<p style="margin:16px 0 0"><a class="more" href="{esc(project_url)}/-/security/vulnerability_report" '
-              'rel="noopener">Vulnerability report on GitLab ↗</a></p>') if project_url else ""
     real = int(counts.get("real", 0))
-    return f"""{phead("Security", lead, f"Checked {esc(when(sec['at']))}", "bad" if real else "good")}
-<div class="grid2"><section class="panel"><h2>Open findings</h2><p class="sub">On main, from all three scanners.</p>
-<div class="secbig">{total}</div><p class="muted" style="margin:6px 0 0">{"No real high or critical finding in the code we ship." if not real else f"{real} real: fix issues opened for Vallum to build."}</p>
-<div class="chips" style="margin-top:16px;justify-content:flex-start"><span class="chip">SAST</span><span class="chip">Secret detection</span><span class="chip">Container scanning</span></div>{report}</section>
-<section class="panel"><h2>Decisions</h2><p class="sub">Made by code on every Live Patrol.</p><ul class="list dec">{rows}</ul></section></div>"""
+    rows = "".join(f'<tr><td class="num big">{int(counts.get(k, 0))}</td><td>{pill(k, tone)}</td><td class="muted">{esc(text)}</td></tr>'
+                   for k, tone, text in DECISIONS)
+    report = (f'<a class="more" href="{esc(project_url)}/-/security/vulnerability_report" rel="noopener">Vulnerability report ↗</a>'
+              if project_url else "")
+    kpis = "".join([
+        kpi("Open findings", f'<span class="secbig">{total}</span>', "on main, all three scanners"),
+        kpi("Real", str(real), "fix issues opened for Vallum to build" if real else "none in the code we ship"),
+        kpi("In the base image", str(int(counts.get("image", 0))), "system packages, no fix available yet"),
+        kpi("Last checked", esc(when(sec["at"])).replace(" UTC", ""), "UTC, by the Live Patrol"),
+    ])
+    scanners = ('<ul class="list"><li><span class="dot brand"></span><span><b>SAST</b><br><span class="muted small">Reads the code for '
+                'security bugs without running it.</span></span></li><li><span class="dot brand"></span><span><b>Secret detection</b><br>'
+                '<span class="muted small">Looks for passwords or keys committed by mistake.</span></span></li><li><span class="dot brand">'
+                '</span><span><b>Container scanning</b><br><span class="muted small">Checks the image\'s packages for known vulnerabilities; '
+                'step 0 judges it before any visitor.</span></span></li></ul>')
+    return f"""{phead("Security", lead, "No real finding" if not real else f"{real} real", "bad" if real else "good")}
+<div class="kpis">{kpis}</div>
+<div class="grid21" style="margin-top:16px">{card("Decisions", '<div class="tablewrap"><table class="table dec"><thead><tr><th>Count</th><th>Decision</th><th>Meaning</th></tr></thead><tbody>' + rows + '</tbody></table></div>', report, raw=True)}
+{card("Scanners", scanners, "run on every change")}</div>"""
 
 
 # ---------------------------------------------------------------- rules (read-only copies)
@@ -404,102 +450,94 @@ def rules(docs: dict, project_url: str, chosen: str | None) -> str | None:
     refreshed = f" ({esc(when(docs.get('at')))})" if docs.get("at") else ""
     note = (f'<p class="note info">🔒 Read-only copy of <b>main</b>{at}, refreshed by every Live Patrol{refreshed}. These '
             'files change only through a merge request; agents can never change the Rulebook, the policy or the code map.</p>')
-    return f"""{phead("Rules and code", lead)}{note}<div class="rules"><nav class="panel toc" aria-label="Documents">{toc}</nav>
-<article class="panel doc"><h2>{esc(current.get("title"))}</h2><div class="meta"><span class="mono muted">{esc(path)}</span>{open_link}</div>{rendered}</article></div>"""
+    return f"""{phead("Rules and code", lead)}{note}<div class="rules"><nav class="card toc" aria-label="Documents">{toc}</nav>
+<section class="card doc"><div class="hd"><h2>{esc(current.get("title"))}</h2><span class="mono">{esc(path)}</span>{open_link}</div><div class="bd">{rendered}</div></section></div>"""
 
 
 # ---------------------------------------------------------------- styles and the live script
 CSS = """
-.hero{text-align:center;padding:28px 0 38px}.hero h1{font-size:clamp(36px,5.8vw,66px);font-weight:800;letter-spacing:-.045em;line-height:1.03;margin:20px auto 16px;max-width:920px}
-.hero p{font-size:18px;color:var(--muted);max-width:660px;margin:0 auto}
-.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}@media (max-width:1080px){.tiles{grid-template-columns:repeat(2,1fr)}}@media (max-width:580px){.tiles{grid-template-columns:1fr}}
-.tile{background:var(--soft);border:1px solid transparent;border-radius:28px;padding:26px 24px 22px;display:flex;flex-direction:column;min-height:380px;color:var(--ink);text-decoration:none;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
-.tile:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:var(--line)}@media (max-width:580px){.tile{min-height:0}.hero{padding-top:8px}}.tile h2{font-size:25px;font-weight:800}
-.tile .viz{flex:1;display:flex;align-items:center;padding:20px 0}.tile p{margin:0;color:var(--ink2);font-size:14.5px;line-height:1.55}
-.tile .go{margin-top:14px;font-weight:700;font-size:13.5px;color:var(--teal)}
-.vbox{background:var(--surface);border-radius:20px;padding:16px 18px;width:100%;box-shadow:0 1px 2px rgba(40,32,16,.05),0 8px 20px rgba(40,32,16,.04)}
-.vbox.center{text-align:center}.big{font-size:46px;font-weight:800;letter-spacing:-.045em;line-height:1}.big small{font-size:18px;color:var(--muted);font-weight:700;letter-spacing:0}
-.fdots{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px}.fdots span{width:15px;height:15px;border-radius:5px;background:var(--good)}
-.fdots span.bad{background:var(--bad)}.fdots span.info{background:#c9c3b5}
-.chips{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:12px}
-.abar{display:grid;grid-template-columns:84px 1fr 38px;gap:10px;align-items:center;font-size:12.5px;font-weight:700;padding:5px 0}
-.abar .t{height:9px;border-radius:999px;background:var(--soft2);overflow:hidden}.abar .t b{display:block;height:100%;border-radius:999px;background:var(--good)}
-.abar.warn .t b{background:#e0a92a}.abar.bad .t b{background:var(--bad)}.abar span:last-child{text-align:right}
-.mtrack{display:flex;align-items:center}.mtrack .st{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;background:var(--soft2);color:var(--muted);border:2px solid var(--line);flex:none}
-.mtrack .st.done{background:var(--good);border-color:var(--good);color:#fff}.mtrack .st.fail{background:var(--bad);border-color:var(--bad);color:#fff}
-.mtrack .st.now{background:var(--lime);border-color:#b7d23a;color:var(--ink);animation:pulse 1.4s infinite}
-.mtrack i{flex:1;height:3px;background:var(--line);min-width:6px}.mtrack i.done{background:var(--good)}
-.msplit{height:10px;border-radius:999px;background:var(--soft2);overflow:hidden;margin-top:16px}.msplit b{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#5ec2d4,#b9e36a);transition:width .8s ease}
-.mlab{display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:var(--muted);margin-top:8px}
-.flow{list-style:none;margin:18px 0 0;padding:0;display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
-@media (max-width:1080px){.flow{grid-template-columns:repeat(3,1fr)}}@media (max-width:580px){.flow{grid-template-columns:1fr}}
-.flow li{background:var(--soft2);border-radius:20px;padding:16px;display:flex;flex-direction:column}
-.flow .n{width:30px;height:30px;border-radius:50%;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;font-size:13px;font-weight:800}
-.flow b{font-size:16px;margin:10px 0 4px}.flow p{margin:0 0 10px;font-size:13.5px;color:var(--muted);line-height:1.5;flex:1}
-.flow .who{align-self:flex-start;font-size:11.5px;font-weight:800;padding:2px 9px;border-radius:999px;background:var(--surface);color:var(--ink2)}
-.events li{align-items:center;flex-wrap:wrap}.events .when{min-width:118px;color:var(--muted);font-size:13px;font-weight:600}
-.lane.active{border-color:#b7d23a;box-shadow:0 0 0 4px var(--lime-soft),var(--shadow)}
-.lane-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:24px}.lane-head h2{font-size:24px;font-weight:800}
-.track{display:flex;align-items:flex-start;margin:4px 0 24px}.stop{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--muted);min-width:64px}
-.stop .c{width:42px;height:42px;border-radius:50%;border:2px solid var(--line);background:var(--surface);display:grid;place-items:center;font-size:16px}
+.tablewrap{overflow-x:auto}.table td.when{white-space:nowrap;color:var(--muted);font-size:12.5px;width:140px}.table td.num{width:40px;color:var(--muted);font-weight:600}
+.banner{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--good);border-radius:var(--r);padding:14px 18px;margin:0 0 16px;box-shadow:var(--shadow)}
+.banner .dot{margin-top:6px}.banner b{font-size:15px}.banner p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.banner.warn{border-left-color:#d97706}.banner.bad{border-left-color:var(--bad)}.banner.brand{border-left-color:var(--brand)}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}@media (max-width:1060px){.kpis{grid-template-columns:1fr 1fr}}@media (max-width:520px){.kpis{grid-template-columns:1fr}}
+.kpi{display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;box-shadow:var(--shadow);color:var(--ink);min-width:0}
+a.kpi:hover{border-color:#c7cdf9;text-decoration:none}
+.kpi .lbl{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.kpi .val{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.2;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.kpi .val small{font-size:15px;color:var(--muted);font-weight:600}
+.kpi .vt{font-size:16px;font-weight:600;letter-spacing:0}.kpi .sub{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}.kpi .meter{margin-top:6px}
+.meter{height:6px;border-radius:999px;background:#e8ecf2;overflow:hidden}.meter b{display:block;height:100%;background:var(--good);border-radius:999px}
+.meter.bad b{background:var(--bad)}.meter.warn b{background:#d97706}.meter.info b{background:#94a3b8}
+.abar{display:grid;grid-template-columns:96px 1fr 40px 64px;gap:10px;align-items:center;padding:7px 0;font-size:13px}.abar .n{font-weight:600}
+.abar .t{height:8px;border-radius:999px;background:#e8ecf2;overflow:hidden}.abar .t b{display:block;height:100%;border-radius:999px;background:var(--good)}
+.abar.warn .t b{background:#d97706}.abar.bad .t b{background:var(--bad)}.abar .p{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}.abar .pill{justify-self:start}
+.flow{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(6,1fr);gap:0;position:relative}
+@media (max-width:1060px){.flow{grid-template-columns:repeat(3,1fr);row-gap:18px}}@media (max-width:560px){.flow{grid-template-columns:1fr}}
+.flow li{position:relative;padding:0 12px 0 0}
+.flow li::after{content:"";position:absolute;top:14px;left:34px;right:8px;height:2px;background:var(--line)}.flow li:last-child::after{display:none}
+.flow .n{position:relative;z-index:1;width:28px;height:28px;border-radius:50%;background:var(--brand-soft);color:var(--brand-ink);border:1px solid #d6daff;display:grid;place-items:center;font-size:12.5px;font-weight:700}
+.flow b{display:block;margin:10px 0 2px;font-size:14px}.flow p{margin:0 0 8px;font-size:12.5px;color:var(--muted);line-height:1.5}
+.flow .who{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:var(--sunken);border:1px solid var(--line);color:var(--ink2)}
+.lane-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}.lane-head h3{font-size:16px;font-weight:600}
+.track{display:flex;align-items:flex-start;margin:4px 0 18px}.stop{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted);min-width:56px}
+.stop .c{width:30px;height:30px;border-radius:50%;border:2px solid var(--line2);background:var(--surface);display:grid;place-items:center;font-size:13px}
 .stop.done .c{background:var(--good);border-color:var(--good);color:#fff}.stop.fail .c{background:var(--bad);border-color:var(--bad);color:#fff}
-.stop.now .c{background:var(--lime);border-color:#b7d23a;color:var(--ink);animation:pulse 1.4s infinite}.stop.now{color:var(--ink)}
-.seg{flex:1;height:4px;background:var(--line);border-radius:4px;margin-top:19px}.seg.done{background:var(--good)}
-.split{display:flex;height:44px;border-radius:16px;overflow:hidden;background:var(--soft2);font-size:13.5px;font-weight:700}
-.split .new{background:linear-gradient(90deg,#5ec2d4,#b9e36a);color:var(--ink);display:flex;align-items:center;padding:0 14px;white-space:nowrap;transition:width .8s ease}
-.split .old{flex:1;display:flex;align-items:center;justify-content:flex-end;padding:0 14px;color:var(--muted);white-space:nowrap}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}@media (max-width:800px){.stats{grid-template-columns:1fr 1fr}}
-.stat{background:var(--soft2);border-radius:16px;padding:12px 14px;min-width:0}.stat b{display:block;font-size:19px;font-weight:800;overflow-wrap:anywhere}
-.timer{height:6px;background:var(--line);border-radius:6px;margin-top:8px;overflow:hidden}.timer i{display:block;height:100%;background:var(--teal);transition:width 1s linear}
-details.log{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}details.log summary{cursor:pointer;font-weight:700}
-details.log pre{font-family:var(--mono);font-size:12px;background:var(--soft2);border-radius:14px;padding:14px;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:10px 0 0}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(183,210,58,.7)}70%{box-shadow:0 0 0 10px rgba(183,210,58,0)}100%{box-shadow:0 0 0 0 rgba(183,210,58,0)}}
-.queue li,.safety li,.modes li,.dec li{align-items:center}.qn{width:26px;height:26px;border-radius:50%;background:var(--soft2);display:grid;place-items:center;font-size:12.5px;font-weight:800;flex:none}
-.safety .dot,.modes .dot{margin-top:2px}.modes .pill{min-width:104px;justify-content:center}
-.filters{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}
-.filters button{font:inherit;font-size:14px;font-weight:700;border:1px solid var(--line);background:var(--surface);color:var(--ink2);padding:7px 15px;border-radius:999px;cursor:pointer}
-.filters button.on{background:var(--dark);color:#fff;border-color:var(--dark)}
-.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px}
-.fcard{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:22px 22px 20px;color:var(--ink);text-decoration:none;box-shadow:var(--shadow);transition:transform .15s ease;position:relative;overflow:hidden}
-.fcard::before{content:"";position:absolute;inset:0 0 auto 0;height:5px;background:var(--standard)}.fcard.core::before{background:var(--core)}.fcard.experimental::before{background:var(--experimental)}
-.fcard:hover{transform:translateY(-3px)}.fcard.broken{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
-.ftop{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px}.fcard h3{font-size:21px;font-weight:800}
-.fcard .kind{font-size:13.5px;color:var(--muted);margin:3px 0 16px}
-.kept{display:flex;justify-content:space-between;font-size:13.5px;font-weight:700;margin-bottom:7px}
-.meter{height:8px;border-radius:999px;background:var(--soft2);overflow:hidden}.meter b{display:block;height:100%;background:var(--good);border-radius:999px}
-.meter.bad b{background:var(--bad)}.meter.info b{background:var(--info)}
-.types{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 0}.types span{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft2);padding:2px 8px;border-radius:8px}
-.fcard .open{margin-top:auto;padding-top:16px;font-weight:700;font-size:13.5px;color:var(--teal)}
-.switch{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;font-weight:700;color:var(--muted);margin-left:auto}
+.stop.now .c{background:var(--brand);border-color:var(--brand);color:#fff;animation:pulse 1.4s infinite}.stop.now{color:var(--brand-ink)}
+.seg{flex:1;height:2px;background:var(--line2);margin-top:14px}.seg.done{background:var(--good)}
+.split{display:flex;height:30px;border-radius:8px;overflow:hidden;background:#e8ecf2;font-size:12.5px;font-weight:600}
+.split .new{background:var(--brand);color:#fff;display:flex;align-items:center;padding:0 12px;white-space:nowrap;transition:width .8s ease}
+.split .old{flex:1;display:flex;align-items:center;justify-content:flex-end;padding:0 12px;color:var(--muted);white-space:nowrap}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}@media (max-width:800px){.stats{grid-template-columns:1fr 1fr}}
+.stat{background:var(--sunken);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}.stat span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.stat b{display:block;font-size:17px;font-weight:700;overflow-wrap:anywhere}
+.timer{height:4px;background:var(--line);border-radius:4px;margin-top:6px;overflow:hidden}.timer i{display:block;height:100%;background:var(--brand);transition:width 1s linear}
+details.log{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}details.log summary{cursor:pointer;font-weight:600;font-size:13.5px}
+details.log pre{font-family:var(--mono);font-size:11.5px;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px 14px;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:10px 0 0}
+.lane.compact .stats,.lane.compact details.log{display:none}.lane.compact .lane-head{margin-bottom:12px}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(67,56,202,.45)}70%{box-shadow:0 0 0 8px rgba(67,56,202,0)}100%{box-shadow:0 0 0 0 rgba(67,56,202,0)}}
+.list{list-style:none;margin:0;padding:0}.list>li{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--line)}
+.list>li:first-child{border-top:0;padding-top:0}.list>li:last-child{padding-bottom:0}.list .dot{margin-top:6px}
+.filters{display:inline-flex;gap:2px;padding:3px;margin:0 0 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.filters button{font:inherit;font-size:13px;font-weight:600;border:0;background:transparent;color:var(--ink2);padding:6px 12px;border-radius:7px;cursor:pointer}
+.filters button b{font-weight:600;color:var(--muted);margin-left:2px}.filters button.on{background:var(--brand);color:#fff}.filters button.on b{color:#c7cdf9}
+.ftable .fname{font-weight:600;font-size:14.5px;color:var(--ink)}.ftable td{vertical-align:middle}
+.ftable tr.broken td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+.types{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}.types span{font-size:11px;font-weight:500;color:var(--muted);background:var(--sunken);border:1px solid var(--line);padding:0 6px;border-radius:5px}
+.ftable td.kept{min-width:190px}.ftable td.kept span{display:block;font-size:12.5px;font-weight:600;margin-bottom:6px}.ftable td.go{color:var(--muted);font-size:20px;width:24px}
+.switch{display:inline-flex;gap:7px;align-items:center;font-size:12.5px;font-weight:600;color:var(--ink2)}
 .switch i{width:28px;height:16px;border-radius:999px;background:var(--good);position:relative;flex:none}.switch i::after{content:"";position:absolute;top:2px;left:14px;width:12px;height:12px;border-radius:50%;background:#fff}
-.switch.off i{background:#cfc8b9}.switch.off i::after{left:2px}
-.fhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0 0}.fhead .switch{margin-left:0}
-.dgrid{display:grid;grid-template-columns:1.25fr .75fr;gap:20px;align-items:start}.dgrid>*,.rules>*{min-width:0}@media (max-width:980px){.dgrid{grid-template-columns:1fr}}
-.ptype{margin:0 0 18px}.ptype h3{font-size:12.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 4px}
-.prom .dot{margin-top:9px}.prom .pid{font-weight:800}.prom .says{margin:2px 0}.prom .res{font-size:13.5px;font-weight:600}
+.switch.off i{background:#cbd5e1}.switch.off i::after{left:2px}
+.dgrid{display:grid;grid-template-columns:1.35fr .65fr;gap:16px;align-items:start}.dgrid>*,.rules>*{min-width:0}@media (max-width:1060px){.dgrid{grid-template-columns:1fr}}
+.ptable tr.group td{background:var(--sunken);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:7px 14px}
+.ptable td:first-child{width:22px;padding-right:0}.ptable .dot{display:inline-block;margin-top:5px}.ptable .says{margin:2px 0}.ptable .res{font-size:12.5px;font-weight:500}
 .res.good{color:var(--good)}.res.warn{color:var(--warn)}.res.bad{color:var(--bad)}.res.info{color:var(--muted)}
-.prom .where{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.prom .where .chip{font-family:inherit;font-size:11.5px;font-weight:600}
-.cardfile{position:sticky;top:100px}.cardfile .yaml{max-height:62vh}@media (max-width:980px){.cardfile{position:static}}
-.tiers4{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:20px}@media (max-width:1080px){.tiers4{grid-template-columns:1fr 1fr}}@media (max-width:580px){.tiers4{grid-template-columns:1fr}}
-.tcard{background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:24px 20px;box-shadow:var(--shadow);text-align:center}
-.ring{--c:var(--good);width:124px;height:124px;margin:2px auto 16px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p)*1%),var(--soft2) 0);display:grid;place-items:center}
-.ring.warn{--c:#e0a92a}.ring.bad{--c:var(--bad)}.ring span{width:98px;height:98px;border-radius:50%;background:var(--surface);display:grid;place-items:center;align-content:center;line-height:1.05}
-.ring b{font-size:27px;font-weight:800}.ring small{font-size:12px;color:var(--muted);font-weight:600}
-.tcard h3{font-size:19px;font-weight:800;display:flex;gap:8px;justify-content:center;align-items:center}.tcard p{margin:8px 0 0;font-size:13.5px;color:var(--muted)}
-.secbig{font-size:68px;font-weight:800;letter-spacing:-.045em;line-height:1}.dec .n{font-size:24px;font-weight:800;min-width:58px}
-.rules{display:grid;grid-template-columns:260px 1fr;gap:20px;align-items:start}@media (max-width:880px){.rules{grid-template-columns:1fr}}
-.toc{padding:10px;position:sticky;top:100px}.toc a{display:block;padding:10px 14px;border-radius:14px;color:var(--ink2);text-decoration:none;font-weight:700}
-.toc a:hover{background:var(--soft2)}.toc a.on{background:var(--soft);color:var(--ink)}.toc small{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400}
+.where{display:flex;gap:4px;flex-wrap:wrap}.where .chip{font-family:inherit;font-size:11px}
+.cardfile{position:sticky;top:20px}.cardfile .yaml{max-height:64vh}@media (max-width:1060px){.cardfile{position:static}}
+.tiers4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}@media (max-width:1060px){.tiers4{grid-template-columns:1fr 1fr}}@media (max-width:520px){.tiers4{grid-template-columns:1fr}}
+.tcard{padding:16px 18px}.tcard .tt{display:flex;justify-content:space-between;align-items:center}.tcard h3{font-size:15px;font-weight:600}
+.gauge{--c:var(--good);width:112px;height:112px;margin:14px auto;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p)*1%),#e8ecf2 0);display:grid;place-items:center}
+.gauge.warn{--c:#d97706}.gauge.bad{--c:var(--bad)}.gauge span{width:88px;height:88px;border-radius:50%;background:var(--surface);display:grid;place-items:center;align-content:center;line-height:1.1}
+.gauge b{font-size:22px;font-weight:700}.gauge small{font-size:11.5px;color:var(--muted)}
+.tcard p{margin:0;color:var(--muted);text-align:center}.tcard p.mw{margin-top:6px;color:var(--ink2);font-weight:500;font-size:13px}
+.secbig{font-size:26px}.dec td.big{font-size:18px;font-weight:700;color:var(--ink)}
+.rules{display:grid;grid-template-columns:250px 1fr;gap:16px;align-items:start}@media (max-width:880px){.rules{grid-template-columns:1fr}}
+.toc{padding:6px;position:sticky;top:20px}.toc a{display:block;padding:9px 12px;border-radius:8px;color:var(--ink2);font-weight:600;text-decoration:none}
+.toc a:hover{background:var(--sunken)}.toc a.on{background:var(--brand-soft);color:var(--brand-ink)}.toc small{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400}
 @media (max-width:880px){.toc{position:static;display:flex;overflow-x:auto;gap:4px}.toc a{white-space:nowrap}.toc small{display:none}}
-.doc{min-width:0}.doc .meta{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:4px 0 18px}
+.doc .hd .mono{margin-right:auto}
+@media (max-width:700px){.table thead{display:none}.table,.table tbody,.table tr,.table td{display:block;width:100%}
+.table tr{padding:10px 16px;border-bottom:1px solid var(--line)}.table tr:last-child{border-bottom:0}.table td{padding:3px 0;border:0}
+.table td.go,.ptable td:first-child{display:none}.table td.when,.table td.num{width:auto}.ftable td.kept{min-width:0;padding-top:8px}
+.ptable tr.group{padding:0}.ptable tr.group td{padding:7px 16px}.abar{grid-template-columns:84px 1fr 38px}.abar .pill{display:none}}
 """
 
 FILTER_SCRIPT = r"""
-const buttons = [...document.querySelectorAll('.filters button')], cards = [...document.querySelectorAll('.fcard')];
+const buttons = [...document.querySelectorAll('.filters button')], rows = [...document.querySelectorAll('tr.fcard')];
 buttons.forEach(b => b.onclick = () => {
   buttons.forEach(x => x.classList.toggle('on', x === b));
-  cards.forEach(c => c.hidden = b.dataset.tier !== 'all' && c.dataset.tier !== b.dataset.tier);
+  rows.forEach(r => r.hidden = b.dataset.tier !== 'all' && r.dataset.tier !== b.dataset.tier);
 });
+rows.forEach(r => r.onclick = e => { if (!e.target.closest('a')) location.href = r.dataset.href; });
 """
 
 LIVE_SCRIPT = r"""
@@ -521,52 +559,45 @@ function state(data) {
     else if (verdicts[s] && verdicts[s] !== 'kept') cls = 'fail';
     else if (active && ((s === 0 && d.phase !== 'traffic') || (d.phase === 'traffic' && s === d.pct))) cls = 'now';
     else if ((s === 0 && d.phase === 'refused') || (d.phase === 'rolled_back' && s === d.pct)) cls = 'fail';
-    return {label: s === 0 ? 'Step 0' : s + '%', short: s === 0 ? '0' : s + '%', cls};
+    return {label: s === 0 ? 'Step 0' : s + '%', cls};
   });
   const head = active ? 'Shipping now' : d.phase === 'released' ? 'Released' : d.phase === 'refused' ? 'Refused at step 0' :
     d.phase === 'rolled_back' ? 'Rolled back' : 'Stopped';
-  const tone = active ? 'lime' : d.phase === 'released' ? 'good' : 'bad';
+  const tone = active ? 'brand' : d.phase === 'released' ? 'good' : 'bad';
   const where = !active && d.phase !== 'released' && !['refused', 'rolled_back'].includes(d.phase) ? 'This test drive stopped without a result; the Watchdog cleans it up.' :
     d.phase === 'step0' || d.phase === 'starting' ? 'Step 0: the new version runs on a private address; no visitor sees it yet.' :
     d.phase === 'traffic' ? pct + '% of visitors are on the new version; the rest stay on the current one.' :
     d.phase === 'released' ? 'Every visitor is on the new version.' : (d.reason || '');
   return {d, active, pct, stops, head, tone, where};
 }
-function track(st, cls, short) {
-  return st.stops.map((s, i) => (i ? '<' + (short ? 'i' : 'span') + ' class="' + (short ? '' : 'seg ') + (s.cls === 'done' ? 'done' : '') + '"></' + (short ? 'i' : 'span') + '>' : '') +
-    (short ? '<span class="st ' + s.cls + '">' + (s.cls === 'fail' ? '✕' : s.short) + '</span>'
-           : '<span class="stop ' + s.cls + '"><span class="c">' + (s.cls === 'done' ? '✓' : s.cls === 'fail' ? '✕' : '') + '</span>' + s.label + '</span>')).join('');
-}
 function renderLane(st, data) {
   const el = $('lane'); if (!el) return;
   const d = st.d;
-  el.className = 'panel lane' + (st.active ? ' active' : '');
-  if (!d.release_id) { el.innerHTML = '<div class="lane-head"><span class="pill info">No release yet</span><h2>All quiet</h2></div><p class="muted" style="margin:0">When a change merges, its test drive appears here live: step 0 on a private address, then a growing share of visitors.</p>'; return; }
+  if (!d.release_id) { el.innerHTML = '<p class="empty">No release yet. When a change merges, its test drive appears here live.</p>'; return; }
   const mr = d.mr_iid && data.project_url ? ' · <a href="' + esc(data.project_url) + '/-/merge_requests/' + Number(d.mr_iid) + '">!' + Number(d.mr_iid) + '</a>' : '';
   const watch = Number(d.watch_s || 0), elapsed = Number(d.elapsed || 0), tw = watch ? Math.min(100, 100 * elapsed / watch) : 0;
   const stats = st.active ? '<div class="stats">' +
-    '<div class="stat"><span class="muted small">This step</span><b>' + elapsed + ' / ' + watch + ' s</b><div class="timer"><i style="width:' + tw + '%"></i></div></div>' +
-    '<div class="stat"><span class="muted small">Visits (on the new version)</span><b>' + Number(d.visits || 0) + ' (' + Number(d.visits_new || 0) + ')</b></div>' +
-    '<div class="stat"><span class="muted small">Judgment</span><b>' + esc(d.status || (d.phase === 'step0' ? 'checking' : 'starting')) + '</b></div>' +
-    '<div class="stat"><span class="muted small">Closest promise</span><b style="font-size:13.5px">' + esc(d.worst || '—') + '</b></div></div>' : '';
+    '<div class="stat"><span>This step</span><b>' + elapsed + ' / ' + watch + ' s</b><div class="timer"><i style="width:' + tw + '%"></i></div></div>' +
+    '<div class="stat"><span>Visits (new version)</span><b>' + Number(d.visits || 0) + ' (' + Number(d.visits_new || 0) + ')</b></div>' +
+    '<div class="stat"><span>Judgment</span><b>' + esc(d.status || (d.phase === 'step0' ? 'checking' : 'starting')) + '</b></div>' +
+    '<div class="stat"><span>Closest promise</span><b style="font-size:13px">' + esc(d.worst || '—') + '</b></div></div>' : '';
   const when = st.active ? 'updated ' + ago(d.updated_at) : 'finished ' + ago(d.finished_at || d.updated_at);
-  el.innerHTML = '<div class="lane-head"><span class="pill ' + st.tone + '">' + st.head + '</span><h2>' + esc(d.title || d.feature || '') + '</h2><span class="muted small">' +
+  const track = st.stops.map((s, i) => (i ? '<span class="seg ' + (s.cls === 'done' ? 'done' : '') + '"></span>' : '') +
+    '<span class="stop ' + s.cls + '"><span class="c">' + (s.cls === 'done' ? '✓' : s.cls === 'fail' ? '✕' : '') + '</span>' + s.label + '</span>').join('');
+  el.innerHTML = '<div class="lane-head"><span class="pill ' + st.tone + '">' + st.head + '</span><h3>' + esc(d.title || d.feature || '') + '</h3><span class="muted small">' +
     esc(d.release_id || '') + ' · ' + esc((d.tier || '').replace(/^./, c => c.toUpperCase())) + mr + ' · ' + when + '</span></div>' +
-    '<div class="track" aria-label="Test-drive steps">' + track(st) + '</div>' +
+    '<div class="track" aria-label="Test-drive steps">' + track + '</div>' +
     '<div class="split" role="img" aria-label="' + st.pct + '% of visitors on the new version"><div class="new" style="width:' + Math.max(st.pct, st.pct ? 8 : 0) + '%;min-width:' + (st.pct ? 76 : 0) + 'px">' + (st.pct ? 'new ' + st.pct + '%' : '') + '</div>' + (st.pct < 100 ? '<div class="old">current ' + (100 - st.pct) + '%</div>' : '') + '</div>' +
-    '<p class="muted small" style="margin:12px 0 0">' + esc(st.where) + '</p>' + stats +
+    '<p class="muted small" style="margin:10px 0 0">' + esc(st.where) + '</p>' + stats +
     '<details class="log" id="lane-log"' + (logOpen ? ' open' : '') + '><summary>Live log</summary><pre>' + esc((d.log || []).join('\n') || 'No log lines yet.') + '</pre></details>';
   $('lane-log').ontoggle = e => { logOpen = e.target.open; };
 }
-function renderMini(st) {
-  const el = $('mini'); if (!el || !st.d.release_id) return;
-  const d = st.d;
-  el.innerHTML = '<div class="vbox"><div class="mtrack">' + track(st, '', true) + '</div><div class="msplit"><b style="width:' + st.pct + '%"></b></div>' +
-    '<div class="mlab"><span>' + esc(d.release_id) + ' · ' + esc(d.feature || '') + '</span><span>' + (st.active ? st.pct + '% live' : esc(st.head.toLowerCase())) + '</span></div></div>';
-  $('mini-text').textContent = st.active ? 'Test drive ' + d.release_id + ' (' + (d.feature || '') + '): ' + st.where :
-    st.head + ' ' + ago(d.finished_at || d.updated_at) + ': ' + (d.title || d.feature || '') + '.';
+function renderKpi(st) {
+  const el = $('kpi-ship'); if (!el || !st.d.release_id) return;
+  el.querySelector('.val').textContent = st.active ? (st.d.phase === 'traffic' ? st.pct + '%' : 'Step 0') : st.head;
+  el.querySelector('.sub').textContent = st.d.release_id + ' · ' + (st.d.feature || '') + ' · ' + (st.active ? 'live' : ago(st.d.finished_at || st.d.updated_at));
 }
-function render(data) { const st = state(data); renderLane(st, data); renderMini(st); return st; }
+function render(data) { const st = state(data); renderLane(st, data); renderKpi(st); return st; }
 async function poll() {
   let wait = 20000;
   try {
