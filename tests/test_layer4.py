@@ -283,8 +283,7 @@ def test_the_drive_skips_switched_off_features_unless_the_release_changes_them()
 
 
 def test_every_flow_prompt_renders_the_conversation_history():
-    """Session 10034890: without `placeholder: history` a sub-agent never saw the Flight Director's task on its
-    first turn (guardians asked for it, the Builder refused, the Reviewer searched 24 MRs)."""
+    """A resumed sub-agent session gets the Flight Director's follow-up as a new message in its history."""
     import glob
 
     import yaml
@@ -436,3 +435,20 @@ def test_a_control_room_only_change_has_nothing_to_test_drive(monkeypatch):
     assert not Drive.app_changed(stub(["control/views.py", "tests/test_layer4.py"]))
     assert Drive.app_changed(stub(["control/ui.py", "app/features/home.py"]))
     assert Drive.app_changed(stub(["Dockerfile"])) and Drive.app_changed(stub([], live=None))   # unclear means yes
+
+
+def test_every_sub_agent_prints_the_flight_directors_task():
+    """Sessions 10034890 and 10069620: GitLab writes a new delegation into the sub-agent's `goal` (not its history),
+    so a sub-agent whose prompt never prints {{ goal }} starts with no task and asks for it."""
+    import yaml
+
+    flow = yaml.safe_load(open(".gitlab/duo/flows/ship.yaml", encoding="utf-8"))
+    comps = {c["name"]: c for c in flow["components"]}
+    prompts = {p["prompt_id"]: p for p in flow["prompts"]}
+    director = comps["flight_director"]
+    assert director["model_tags"] == ["small"]                                   # the fast model coordinates
+    assert "kickoff" in prompts[director["prompt_id"]]["prompt_template"]["system"]
+    for sub in director["subagents"]:
+        c = comps[sub["name"]]
+        assert {"from": "context:goal", "as": "goal"} in c["inputs"], sub["name"]
+        assert "{{ goal }}" in prompts[c["prompt_id"]]["prompt_template"]["user"], sub["name"]

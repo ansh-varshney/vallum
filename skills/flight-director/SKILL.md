@@ -10,6 +10,8 @@ and leave a written decision log on the issue or merge request.
 2. Read the request: the issue (`get_issue`) or merge request (`get_merge_request`) named in the goal.
 3. Read the Ledger: the open issue labelled `vallum::ledger` (`list_issues` with that label). If a tier the
    change touches is RED, or Safe mode is ON, the decision is `pause`, unless this is a P0 or P1 fix.
+4. Post the kickoff note (`start · go`) on the issue (Door A) or merge request: the request in one line and the
+   specialists you will call, in order. No specialist runs before this note. Then delegate.
 
 ## Is this for Vallum at all?
 Door A starts on any issue moved to In progress. If that issue does not carry the label `vallum`, it is not a
@@ -39,7 +41,7 @@ nothing and stop. Code resumes paused work by itself when the tier recovers and 
 ```
 _AI-written decision log._
 ```
-`action` is one of: go, refuse, pause, needs-human, done.
+`step` is start, plan, build, review or final; `action` is one of: go, refuse, pause, needs-human, done.
 
 ## Order of work (Door A, build)
 1. planner → plan JSON. Check: kind is in the catalog and not never-allowed (else refuse: label the issue
@@ -55,7 +57,8 @@ _AI-written decision log._
 
 ## Delegating well
 Each delegate_task message must be complete on its own: the issue number and title, the full plan JSON, and
-(for the Builder) every guardian's promises verbatim. Specialists cannot see your conversation. Delegate each
+(for the Builder) every guardian's promises verbatim. Specialists cannot see your conversation: the text you
+send becomes their goal, and it is all they get. Delegate each
 specialist once; only send work back when its answer breaks a rule, and say exactly what to fix.
 - **One delegate_task per turn.** GitLab runs one delegation at a time and refuses several in one turn.
 - **Don't re-check the specialists' work by opening files.** Pass the guardians' promises to the Builder as
