@@ -1,0 +1,86 @@
+# Feature Card: link exists check, says whether a short code exists without revealing its destination.
+feature: link-exists
+issue: 10
+kind: new-endpoint
+tier: standard
+priority: P2
+owns:
+  routes: ["GET /api/links/{code}/exists"]
+  files: [app/features/link_exists.py, tests/test_link_exists.py]
+flag: link_exists
+promises:
+  behavior:
+    - id: link-exists-true
+      says: "For a code that exists, it answers 200 with exists: true"
+      steps:
+        - "POST /api/links {url: 'https://example.com/e-{rand}'} -> 201 => link"
+        - "GET /api/links/{link.code}/exists -> 200 json exists=True"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: link-exists-false
+      says: "For a code that doesn't exist, it answers 200 with exists: false (not 404)"
+      steps:
+        - "GET /api/links/nonexistent-{rand}/exists -> 200 json exists=False"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: link-exists-no-url
+      says: "The answer never includes the link's destination URL"
+      steps:
+        - "POST /api/links {url: 'https://secret.example.com/hidden-{rand}'} -> 201 => link"
+        - "GET /api/links/{link.code}/exists -> 200 json exists=True"
+        - "GET /api/links/{link.code}/exists -> 200 json code={link.code}"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: link-exists-odd-code
+      says: "Invalid codes answer 200 with exists: false"
+      steps:
+        - "GET /api/links/invalid@code-{rand}/exists -> 200 json exists=False"
+      where: [mr, drive]
+      severity: major
+  speed:
+    - id: link-exists-fast
+      says: "95% of link existence checks finish in under 300 ms"
+      measure: "p95(latency, route='GET /api/links/{code}/exists') < 300ms"
+      where: [mr, drive, live]
+      severity: major
+  reliability:
+    - id: link-exists-reliable
+      says: "Fewer than 0.5% of link existence checks fail"
+      measure: "error_rate(route='GET /api/links/{code}/exists') < 0.5%"
+      where: [mr, drive, live]
+      severity: blocker
+  security:
+    - id: link-exists-no-url-leak
+      says: "The exists endpoint returns only code and exists flag, never the destination URL"
+      steps:
+        - "POST /api/links {url: 'https://secret.example.com/private'} -> 201 => link"
+        - "GET /api/links/{link.code}/exists -> 200 json exists=True"
+        - "GET /api/links/{link.code}/exists -> 200 json code={link.code}"
+      where: [mr, drive]
+      severity: blocker
+    - id: link-exists-odd-codes-safe
+      says: "Codes with invalid characters answer 200 exists false without error"
+      steps:
+        - "GET /api/links/code_with_underscore/exists -> 200 json exists=False"
+        - "GET /api/links/code.with.dots/exists -> 200 json exists=False"
+        - "GET /api/links/a%40b/exists -> 200 json exists=False"
+      where: [mr, drive]
+      severity: major
+    - id: link-exists-long-codes-safe
+      says: "Codes longer than 64 characters answer 200 exists false without error"
+      steps:
+        - "GET /api/links/{rand-65}/exists -> 200 json exists=False"
+      where: [mr, drive]
+      severity: major
+    - id: link-exists-no-secrets
+      says: "The module never references secret stores or API keys"
+      static: {file_lacks: [app/features/link_exists.py, "vallum_secrets"]}
+      where: [mr, drive]
+      severity: blocker
+    - id: link-exists-public-no-key
+      says: "Reading link existence does not require an API key"
+      steps:
+        - "POST /api/links {url: 'https://example.com/pub-{rand}'} -> 201 => link"
+        - "anon GET /api/links/{link.code}/exists -> 200 json exists=True"
+      where: [mr, drive]
+      severity: blocker
