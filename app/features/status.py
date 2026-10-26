@@ -366,7 +366,7 @@ function render(data) {
   lane.innerHTML = '<div class="lane-head">' + head + '<h3>' + esc(d.title || d.feature || '') + '</h3><span class="muted small">' +
     esc(d.release_id || '') + ' · ' + esc((d.tier || '').replace(/^./, c => c.toUpperCase())) + mr + ' · updated ' + ago(d.updated_at) + '</span></div>' +
     '<div class="track" aria-label="Test-drive steps">' + track + '</div>' +
-    '<div class="split" role="img" aria-label="' + pct + '% of visitors on the new version"><div class="new" style="width:' + Math.max(pct, pct ? 8 : 0) + '%;min-width:' + (pct ? 72 : 0) + 'px">' + (pct ? 'new ' + pct + '%' : '') + '</div><div class="old">' + (100 - pct ? 'current ' + (100 - pct) + '%' : '') + '</div></div>' +
+    '<div class="split" role="img" aria-label="' + pct + '% of visitors on the new version"><div class="new" style="width:' + Math.max(pct, pct ? 8 : 0) + '%;min-width:' + (pct ? 72 : 0) + 'px">' + (pct ? 'new ' + pct + '%' : '') + '</div>' + (pct < 100 ? '<div class="old">current ' + (100 - pct) + '%</div>' : '') + '</div>' +
     '<p class="muted small" style="margin:10px 0 0">' + where + '</p>' + stats +
     '<details id="lane-log"' + (logOpen ? ' open' : '') + '><summary>Live log</summary><pre>' + esc(log || 'No log lines yet.') + '</pre></details>';
   document.getElementById('lane-log').ontoggle = e => { logOpen = e.target.open; };

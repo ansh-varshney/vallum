@@ -6,7 +6,11 @@ allowance permits. Agents write code, promises and explanations; **code decides 
 
 Built for the GitLab Transcend "Life After Code" hackathon (Path A, Hands-off).
 
-- **Live status page** (Google Cloud Run): <https://vallum-256944994567.us-central1.run.app/status>
+- **The app** (a small link shortener on Google Cloud Run): <https://vallum-256944994567.us-central1.run.app/>
+- **Live status page**: <https://vallum-256944994567.us-central1.run.app/status> (a live lane for the release being
+  test-driven, every feature as a card with its promises, the queue, allowances) and
+  [rules and code](https://vallum-256944994567.us-central1.run.app/status/rules) (read-only copies of the Rulebook,
+  policy and code map)
 - **The Ledger** (Vallum's state, rewritten by code): [issue #3](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3)
 - **Every run, in the open**: [pipelines](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines)
 
@@ -15,7 +19,7 @@ Built for the GitLab Transcend "Life After Code" hackathon (Path A, Hands-off).
 > Watchdog, visitor simulation). Layer 2 adds the agents: GitLab Duo flows published from this repo, with code
 > still deciding what ships. Layer 3 adds judgment (mistake allowances and modes, scoped freezes, `@vallum`
 > commands, needs-human escalation) and project context that works for any codebase. Layer 4 adds the public
-> status page, image scanning judged before release, and security triage.
+> status page with a live release lane, image scanning judged before release, security triage and kill switches.
 
 ## How it works
 
@@ -149,7 +153,7 @@ reads Python by AST and JavaScript/TypeScript/Go/Java by pattern (see the Expres
 
 | Path | What it is |
 |---|---|
-| `app/` | FastAPI link shortener; one module per feature in `app/features/` |
+| `app/` | FastAPI link shortener; one module per feature in `app/features/` (home page, links, redirects, status page…); shared look in `app/ui.py` |
 | `promises/` | Feature Cards, app-wide promises (`service.yaml`), learned promises |
 | `vallum/` 🔒 | Rulebook, policy, catalog, card schema and all of Vallum's code |
 | `vallum/checker/` | Promise checker (steps, measure, static, scan) and fail-first check |
