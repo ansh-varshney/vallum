@@ -149,7 +149,7 @@ build-image:
     DOCKER_TLS_CERTDIR: "/certs"
   rules:
     - <<: *if_release
-      changes: [app/**/*, control/**/*, Dockerfile, requirements.txt, deploy/**/*]
+      changes: [app/**/*, control/**/*, Dockerfile, .dockerignore, requirements.txt, deploy/**/*]
   needs: [provenance-gate, unit-tests]
   script:
     - apk add --no-cache curl jq > /dev/null
@@ -182,7 +182,7 @@ container_scanning:
   needs: [build-image]
   rules:
     - <<: *if_release
-      changes: [app/**/*, control/**/*, Dockerfile, requirements.txt, deploy/**/*]
+      changes: [app/**/*, control/**/*, Dockerfile, .dockerignore, requirements.txt, deploy/**/*]
   variables:
     CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
   allow_failure: true
@@ -214,7 +214,7 @@ control-room:
   extends: [.python, .gcp]
   rules:
     - <<: *if_release
-      changes: [app/**/*, control/**/*, Dockerfile, requirements.txt, deploy/**/*]
+      changes: [app/**/*, control/**/*, Dockerfile, .dockerignore, requirements.txt, deploy/**/*]
   needs: [provenance-gate, build-image]
   allow_failure: true
   environment:
