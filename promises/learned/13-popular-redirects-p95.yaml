@@ -1,0 +1,8 @@
+id: popular-redirects-p95-replay
+learned_from: "incident #13"
+type: speed
+says: "95% of redirects for popular links finish in under 150 ms, checked against replayed real traffic before any rollout step"
+measure: "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
+replay: true
+where: [mr, drive, live]
+severity: blocker
