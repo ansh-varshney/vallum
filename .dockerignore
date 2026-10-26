@@ -1,4 +1,5 @@
 *
 !app/
+!control/
 !requirements.txt
 **/__pycache__

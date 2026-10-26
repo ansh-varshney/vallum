@@ -406,3 +406,12 @@ def test_a_cold_start_at_a_step_is_warm_up_not_a_broken_promise():
     assert judge.judge_promise(p, old + slow, "new", "old", warmup_s=10, **args)["verdict"] == judge.BROKEN
     counted = allowance.count(old + cold, {"GET /r/{code}": "core"}, {"GET /r/{code}": 150}, warmup_s=10, blame="new")
     assert counted["core"]["bad"] == 0                      # cold-start visits don't spend the allowance either
+
+
+def test_every_folder_the_image_copies_is_in_the_build_context():
+    import re
+    from pathlib import Path
+
+    allowed = {line.strip()[1:].rstrip("/") for line in Path(".dockerignore").read_text().splitlines() if line.startswith("!")}
+    copied = re.findall(r"^COPY (\S+) ", Path("Dockerfile").read_text(), flags=re.M)
+    assert copied and all(src.rstrip("/") in allowed for src in copied), (copied, allowed)   # 023c173: control/ was left out
