@@ -268,3 +268,37 @@ def test_the_drive_skips_switched_off_features_unless_the_release_changes_them()
     assert store.doc(flags.DOC)["for_revision"] == {"link_preview": "rev-9"}
     flags.clear_for_revision(store, "rev-9")
     assert store.doc(flags.DOC)["for_revision"] == {}
+
+
+def test_every_flow_prompt_renders_the_conversation_history():
+    """Session 10034890: without `placeholder: history` a sub-agent never saw the Flight Director's task on its
+    first turn (guardians asked for it, the Builder refused, the Reviewer searched 24 MRs)."""
+    import glob
+
+    import yaml
+
+    for path in glob.glob(".gitlab/duo/flows/*.yaml"):
+        flow = yaml.safe_load(open(path, encoding="utf-8"))
+        for prompt in flow.get("prompts", []):
+            assert prompt["prompt_template"].get("placeholder") == "history", (path, prompt["prompt_id"])
+
+
+def test_a_housekeeping_mr_is_announced_to_the_requester():
+    from vallum.drive import __main__ as drive
+
+    notes, statuses = [], []
+
+    class GL:
+        def add_note(self, kind, iid, body):
+            notes.append((kind, iid, body))
+
+    d = drive.Drive.__new__(drive.Drive)
+    d.gl, d.store = GL(), Store(MemoryState())
+    d.issue_of = lambda mr: 10
+    d.status = lambda mr, step, state, **kw: statuses.append((mr, step, state, kw.get("note")))
+    d.announce_housekeeping({"mr_iid": 22, "release_id": "r-0024"}, {"iid": 23},
+                            [{"file_path": "docs/vallum/CODEMAP.md"}])
+    assert [(k, i) for k, i, _ in notes] == [("merge_requests", 22), ("issues", 10)]
+    assert "opened !23" in notes[0][2] and "refreshes the code map" in notes[0][2] and "expired" not in notes[0][2]
+    assert statuses == [(22, "Housekeeping", "running", "!23")]
+    assert d.store.timeline("merge_requests-23")["housekeeping_for"] == {"mr": 22, "issue": 10, "release": "r-0024"}

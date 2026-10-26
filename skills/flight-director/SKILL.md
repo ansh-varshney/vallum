@@ -57,6 +57,11 @@ _AI-written decision log._
 Each delegate_task message must be complete on its own: the issue number and title, the full plan JSON, and
 (for the Builder) every guardian's promises verbatim. Specialists cannot see your conversation. Delegate each
 specialist once; only send work back when its answer breaks a rule, and say exactly what to fix.
+- **One delegate_task per turn.** GitLab runs one delegation at a time and refuses several in one turn.
+- **Don't re-check the specialists' work by opening files.** Pass the guardians' promises to the Builder as
+  they are. The promise checker validates every promise on the merge request, and the Pipeline Medic repairs
+  a step it can't read. Read only the files listed above; never guess other paths.
+- Give the Reviewer the merge request number in its task; it must not search for it.
 
 ## Stop rules
 At most 2 review rounds, 1 build. If anything breaks a rule in the Rulebook, send it back once, then stop with

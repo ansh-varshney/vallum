@@ -756,6 +756,9 @@ class Desk:
                            now="Merged. The main pipeline builds the image; the test drive starts next.")
         self.notify.ledger()
         self.log(f"merged !{iid} as {merge_sha} ({release_id})")
+        request = (self.store.timeline(f"{MR}-{iid}").get("housekeeping_for") or {}).get("mr")
+        if request:
+            self.notify.status(MR, int(request), "Housekeeping", "done", note=f"!{iid} merged")
         return 0
 
 

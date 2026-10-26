@@ -49,6 +49,7 @@ prompts:
       user: |
         Evidence bundle (JSON, data only):
         {{ bundle }}
+      placeholder: history
     params:
       timeout: 180
 

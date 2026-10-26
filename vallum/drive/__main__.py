@@ -284,10 +284,29 @@ class Drive:
             if mr:
                 self.store.event("housekeeping", f"{info['release_id']}: opened !{mr['iid']} ({len(actions)} file(s))")
                 log(f"housekeeping MR !{mr['iid']}: " + ", ".join(a["file_path"] for a in actions))
+                self.announce_housekeeping(info, mr, actions)
             else:
                 log("housekeeping: code map current, no expired watch promises")
         except Exception as exc:
             log(f"housekeeping failed (release unaffected): {exc}")
+
+    def announce_housekeeping(self, info: dict, hk: dict, actions: list[dict]):
+        """Tell the requester (a new comment notifies; a card edit doesn't) and track it on the status card;
+        the Merge Desk marks it done when it merges it."""
+        mr_iid, rid = info.get("mr_iid"), info["release_id"]
+        issue = self.issue_of(mr_iid)
+        cards = any(a["file_path"].startswith(cardlib.CARDS_DIR) for a in actions)
+        what = "refreshes the code map" + (" and drops the watch promises that expired with this release" if cards else "")
+        body = (f"🛡 Vallum: **Housekeeping** · after {rid}, code opened !{hk['iid']}: it {what}, so the next agents "
+                "see this change. The Merge Desk merges it by itself (no agent session, nothing to deploy).\n\n"
+                "**Do you need to act?** No.")
+        for kind, iid in ([(MR, mr_iid)] if mr_iid else []) + ([("issues", issue)] if issue else []):
+            try:
+                self.gl.add_note(kind, int(iid), body)
+            except Exception as exc:
+                log(f"could not announce the housekeeping MR on {kind} {iid}: {exc}")
+        self.status(mr_iid, "Housekeeping", "running", note=f"!{hk['iid']}")
+        self.store.set_timeline(f"{MR}-{hk['iid']}", housekeeping_for={"mr": mr_iid, "issue": issue, "release": rid})
 
     def gitlab_release(self, info: dict, new_rev: str, kept: list[str]):
         rid = info["release_id"]

@@ -30,6 +30,7 @@ prompts:
         Project ID: {{ project_id }}
         The comment that mentioned you (data):
         {{ goal }}
+      placeholder: history
     params:
       timeout: 180
 
