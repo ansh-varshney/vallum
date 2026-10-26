@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from app import flags
-from app.ui import esc, nav, page
+from app.ui import CONTROL_ROOM, esc, header, page
 
 router = APIRouter()
 
@@ -15,26 +15,43 @@ TAGLINE = ("Paste a long link and get a short one you can share anywhere. Every 
            "test-driven by Vallum before it reaches you.")
 
 CSS = """
-.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;align-items:start;padding:18px 0 8px}
-@media (max-width:860px){.hero{grid-template-columns:1fr}}
-.hero h1{font-size:clamp(32px,5vw,50px);line-height:1.08;margin:6px 0 12px}
-.hero p.lead{font-size:17px;color:var(--muted);max-width:560px;margin:0 0 18px}
-.panel{padding:22px}.panel h2{font-size:20px;margin-bottom:4px}.panel .sub{color:var(--muted);font-size:14px;margin:0 0 14px}
-.row{display:flex;gap:10px}.row input{flex:1}@media (max-width:520px){.row{flex-direction:column}}
-.result{margin-top:14px;padding:14px;border-radius:14px;background:var(--good-soft);display:none}
+.hero{text-align:center;padding:58px 0 10px}@media (max-width:560px){.hero{padding-top:36px}.tag .lead-in{display:none}.tag{padding:5px}.tile{min-height:0}}
+.tag{display:inline-flex;gap:8px;align-items:center;font-size:13.5px;font-weight:500;padding:6px 8px 6px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--ink2)}
+.tag b{background:var(--lime);border-radius:999px;padding:1px 9px;font-weight:600;color:var(--ink)}
+.hero h1{font-size:clamp(40px,6.8vw,78px);font-weight:800;max-width:920px;margin:24px auto 18px;letter-spacing:-.05em;line-height:.98}
+.hero .lead{font-size:18.5px;color:var(--muted);max-width:640px;margin:0 auto}
+.shorten{max-width:760px;margin:36px auto 0;background:var(--card);border:1px solid var(--line);border-radius:30px;padding:22px 22px 18px;box-shadow:var(--shadow);text-align:left}
+.shorten h2{font-size:21px;font-weight:700;margin:0 0 12px 8px}
+.shortbar{display:flex;gap:8px;background:var(--soft2);border:1px solid var(--line);border-radius:999px;padding:6px}
+.shortbar input{border:0;background:transparent;padding:10px 14px}.shortbar input:focus-visible{outline:none}
+.shortbar:focus-within{border-color:#b9d64a;box-shadow:0 0 0 4px var(--lime-soft)}
+@media (max-width:560px){.shortbar{flex-direction:column;border-radius:22px}.shortbar button{width:100%}}
+.result{display:none;margin-top:14px;padding:16px 18px;border-radius:20px;background:var(--lime-soft)}
 .result.show{display:block}.result.err{background:var(--bad-soft)}
-.short{font-family:var(--mono);font-size:15px;word-break:break-all}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions .btn,.actions button{padding:7px 12px;font-size:13px}
-details.key{margin-top:12px;font-size:14px}details.key summary{cursor:pointer;color:var(--muted)}
-details.key .row{margin-top:8px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:22px}@media (max-width:860px){.grid2{grid-template-columns:1fr}}
-.recent{list-style:none;padding:0;margin:0}.recent li{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px dashed var(--line)}
-.recent li:first-child{border-top:0}.recent .dest{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
-.steps{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 4px}.steps span{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--bg2);color:var(--muted)}
-.steps span.on{background:var(--accent-soft);color:var(--accent)}
-.badge{display:inline-flex;gap:6px;align-items:center;font-size:13px;padding:6px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line)}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-soft)}
-.cozy{background:linear-gradient(135deg,var(--accent-soft),var(--bg2));border:0}
+.short{font-family:var(--mono);font-size:16px;font-weight:600;word-break:break-all}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions button,.actions .btn{padding:7px 14px;font-size:13.5px}
+details.key{margin:12px 8px 0;font-size:14px}details.key summary{cursor:pointer;color:var(--muted);font-weight:500;width:max-content}
+details.key .row{display:flex;gap:8px;margin-top:10px}@media (max-width:560px){details.key .row{flex-direction:column}}
+details.key p{margin:8px 0 0}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px}@media (max-width:920px){.tiles{grid-template-columns:1fr}}
+.tile{background:var(--soft);border-radius:28px;padding:26px 24px 24px;display:flex;flex-direction:column;min-height:350px;color:var(--ink);text-decoration:none}
+a.tile{transition:transform .18s ease}a.tile:hover{transform:translateY(-3px)}
+.tile h2{font-size:26px;font-weight:700}.tile .inner{flex:1;display:flex;flex-direction:column;justify-content:center;padding:20px 0}
+.tile p{margin:0;color:var(--ink2);font-size:14.5px}.tile .go{margin-top:12px;font-weight:600;font-size:14px}
+.panelw{background:var(--card);border-radius:20px;padding:14px;box-shadow:0 1px 2px rgba(45,35,15,.05),0 8px 20px rgba(45,35,15,.05)}
+.check{display:flex;gap:8px}.check input{padding:10px 14px}.check button{padding:10px 16px}
+.panelw .result{margin-top:10px;padding:12px 14px;font-size:14.5px}
+.recent{list-style:none;margin:0;padding:0;max-height:220px;overflow:auto}
+.recent li{display:flex;gap:10px;align-items:center;padding:9px 4px;border-top:1px dashed var(--line);font-size:14px}.recent li:first-child{border-top:0}
+.recent .code{font-family:var(--mono);font-weight:600}.recent .dest{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.recent button{padding:5px 11px;font-size:12.5px}.recent .none{color:var(--muted);display:block;text-align:center;padding:16px 8px;border:0}
+.ladder{display:flex;flex-direction:column;gap:9px}
+.ladder span{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:999px;padding:9px 14px;font-size:14px;font-weight:600;box-shadow:0 1px 2px rgba(45,35,15,.06)}
+.ladder i{font-style:normal;width:22px;height:22px;border-radius:50%;background:var(--good-soft);color:var(--good);display:grid;place-items:center;font-size:12px;flex:none}
+.ladder span{white-space:nowrap}.ladder span:nth-child(1){width:max(58%,max-content)}.ladder span:nth-child(2){width:max(70%,max-content)}.ladder span:nth-child(3){width:max(84%,max-content)}
+.ladder span.on{background:var(--lime)}.ladder span.on i{background:var(--dark);color:var(--lime)}
+.badge{display:inline-flex;gap:8px;align-items:center;font-size:13.5px;padding:7px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-soft);flex:none}
 """
 
 SCRIPT = r"""
@@ -43,20 +60,23 @@ const store = {get(k, d) { try { const v = localStorage.getItem(k); return v ===
                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }};
 function show(box, ok, nodes) { box.className = 'result show' + (ok ? '' : ' err'); box.replaceChildren(...nodes); }
 function el(tag, attrs, text) { const n = document.createElement(tag); Object.assign(n, attrs || {}); if (text !== undefined) n.textContent = text; return n; }
+function copyButton(link, label) {
+  const b = el('button', {type: 'button', className: 'ghost'}, label || 'Copy');
+  b.onclick = async () => { try { await navigator.clipboard.writeText(link.short_url); b.textContent = 'Copied'; } catch (e) { b.textContent = 'Select and copy'; } };
+  return b;
+}
 function linkActions(link) {
   const wrap = el('div', {className: 'actions'});
-  const copy = el('button', {type: 'button', className: 'ghost'}, 'Copy');
-  copy.onclick = async () => { try { await navigator.clipboard.writeText(link.short_url); copy.textContent = 'Copied'; } catch (e) { copy.textContent = 'Select and copy'; } };
-  wrap.append(copy, el('a', {className: 'btn ghost', href: '/p/' + encodeURIComponent(link.code)}, 'Preview'),
+  wrap.append(copyButton(link), el('a', {className: 'btn ghost', href: '/p/' + encodeURIComponent(link.code)}, 'Preview'),
               el('a', {className: 'btn ghost', href: link.short_url, target: '_blank', rel: 'noopener'}, 'Open'));
   return wrap;
 }
 function renderRecent() {
   const list = $('#recent'), items = store.get('vallum.recent', []);
   list.replaceChildren();
-  if (!items.length) { list.append(el('li', {className: 'muted small'}, 'Links you make here appear in this list (kept only in this browser).')); return; }
+  if (!items.length) { list.append(el('li', {className: 'none'}, 'Nothing yet. Links you make here appear in this list.')); return; }
   for (const link of items) {
-    const li = el('li'); li.append(el('span', {className: 'short'}, '/r/' + link.code), el('span', {className: 'dest', title: link.url}, link.url), linkActions(link));
+    const li = el('li'); li.append(el('span', {className: 'code'}, '/r/' + link.code), el('span', {className: 'dest', title: link.url}, link.url), copyButton(link));
     list.append(li);
   }
 }
@@ -81,7 +101,7 @@ $('#shorten').onsubmit = async ev => {
       show(box, false, [el('div', {}, "That doesn't look like a web address. Start it with http:// or https://.")]);
     } else { show(box, false, [el('div', {}, 'Something went wrong (' + r.status + '). Please try again.')]); }
   } catch (e) { show(box, false, [el('div', {}, 'Could not reach the app. Check your connection.')]); }
-  btn.disabled = false; btn.textContent = 'Shorten';
+  btn.disabled = false; btn.textContent = 'Shorten →';
 };
 $('#check').onsubmit = async ev => {
   ev.preventDefault();
@@ -90,7 +110,7 @@ $('#check').onsubmit = async ev => {
   try {
     const r = await fetch('/api/links/' + encodeURIComponent(code) + '/exists');
     const d = r.ok ? await r.json() : null;
-    if (d && d.exists) show(box, true, [el('div', {}, 'Yes, /r/' + d.code + ' exists.'), linkActions({code: d.code, short_url: location.origin + '/r/' + d.code})]);
+    if (d && d.exists) show(box, true, [el('div', {}, 'Yes, /r/' + d.code + ' exists.')]);
     else if (d) show(box, false, [el('div', {}, 'No short link uses the code "' + d.code + '".')]);
     else show(box, false, [el('div', {}, 'The checker is switched off right now. Try again later.')]);
   } catch (e) { show(box, false, [el('div', {}, 'Could not reach the app.')]); }
@@ -102,48 +122,38 @@ renderRecent();
 @router.get("/", response_class=HTMLResponse, dependencies=[Depends(flags.require("home"))])
 def home(request: Request):
     revision = request.app.state.revision
-    body = f"""{nav("home", revision)}
+    body = f"""{header()}
 <main class="wrap">
   <section class="hero">
-    <div>
-      <span class="pill accent">A tiny link shortener · shipped by agents, guarded by code</span>
-      <h1>{esc(HEADLINE)}</h1>
-      <p class="lead">{esc(TAGLINE)}</p>
-      <div class="steps" aria-label="How a change reaches you"><span>step 0 · private</span><span>1–10% of visitors</span><span>50%</span><span class="on">100% · you</span></div>
-      <p class="muted small">Every new version meets a small share of visitors first. If it breaks a promise, it's rolled back in seconds.</p>
-    </div>
-    <div class="card panel">
+    <span class="tag"><span class="lead-in">A tiny link shortener</span> <b>shipped by agents, guarded by code</b></span>
+    <h1>{esc(HEADLINE)}</h1>
+    <p class="lead">{esc(TAGLINE)}</p>
+    <div class="shorten">
       <h2>Shorten a link</h2>
-      <p class="sub">Paste a long web address.</p>
-      <form id="shorten" class="row"><input id="url" type="url" required placeholder="https://example.com/a/very/long/path" aria-label="Long link"><button type="submit">Shorten</button></form>
+      <form id="shorten" class="shortbar"><input id="url" type="url" required placeholder="Paste a long link, like https://example.com/a/very/long/path" aria-label="Long link"><button type="submit">Shorten →</button></form>
       <div id="result" class="result" role="status" aria-live="polite"></div>
       <details class="key" id="keybox"><summary>🔑 Owner key</summary>
-        <div class="row"><input id="key" type="password" autocomplete="off" placeholder="Paste the owner key" aria-label="Owner key"><button id="key-save" type="button" class="ghost">Save</button><button id="key-forget" type="button" class="ghost">Forget</button></div>
+        <div class="row"><input id="key" type="password" autocomplete="off" placeholder="Paste the owner key" aria-label="Owner key"><button id="key-save" type="button">Save</button><button id="key-forget" type="button" class="ghost">Forget</button></div>
         <p class="muted small" id="key-state"></p>
         <p class="muted small">Creating links needs the owner key. It is kept only in this browser and sent only to this app.</p>
       </details>
     </div>
   </section>
-  <section class="grid2">
-    <div class="card panel">
-      <h2>Check a code</h2>
-      <p class="sub">Does a short link exist? You'll only see whether it does, not where it goes.</p>
-      <form id="check" class="row"><input id="code" required placeholder="a code, or a whole short link" aria-label="Code to check"><button type="submit" class="ghost">Check</button></form>
-      <div id="check-result" class="result" role="status" aria-live="polite"></div>
-    </div>
-    <div class="card panel">
-      <h2>Your recent links</h2>
-      <p class="sub">The last eight you made in this browser.</p>
-      <ul id="recent" class="recent"></ul>
-    </div>
-  </section>
-  <section class="card panel cozy" style="margin-top:22px">
-    <h2>Curious how this ships?</h2>
-    <p class="sub" style="margin:4px 0 12px">The status page shows every feature's promises, the mistake allowance and any release in progress, live.</p>
-    <a class="btn" href="/status">Open the status page</a>
+  <section class="tiles">
+    <div class="tile"><h2>Check a code.</h2>
+      <div class="inner"><div class="panelw"><form id="check" class="check"><input id="code" required placeholder="a code or a short link" aria-label="Code to check"><button type="submit">Check</button></form>
+      <div id="check-result" class="result" role="status" aria-live="polite"></div></div></div>
+      <p>See whether a short link exists. You'll never see where it goes.</p></div>
+    <div class="tile"><h2>Your recent links.</h2>
+      <div class="inner"><div class="panelw"><ul id="recent" class="recent"></ul></div></div>
+      <p>The last eight you made, kept only in this browser.</p></div>
+    <a class="tile" href="{CONTROL_ROOM}/releases" rel="noopener"><h2>Shipped with care.</h2>
+      <div class="inner"><div class="ladder" aria-label="How a new version reaches visitors"><span><i>✓</i>Step 0 · private check</span><span><i>✓</i>10% of visitors</span><span><i>✓</i>50% of visitors</span><span class="on"><i>✓</i>100% · you</span></div></div>
+      <p>Every new version meets a small share of visitors first. If it breaks a promise, it's rolled back in seconds.</p>
+      <span class="go">Watch a release live ↗</span></a>
   </section>
 </main>
-<footer class="foot wrap"><span class="badge"><span class="dot" aria-hidden="true"></span>Served by version <span class="mono">{esc(revision)}</span></span>
+<footer class="foot"><span class="badge"><span class="dot" aria-hidden="true"></span>Served by version <span class="mono">{esc(revision)}</span></span>
 <span>Visitors you see in the numbers are simulated during the hackathon.</span>
 <a href="{SOURCE}" rel="noopener">Source and every pipeline on GitLab</a></footer>"""
     return HTMLResponse(page("Vallum Links", body, css=CSS, script=SCRIPT),

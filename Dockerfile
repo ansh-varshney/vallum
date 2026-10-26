@@ -9,7 +9,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY control ./control
 RUN useradd --create-home --uid 10001 vallum
 USER vallum
 
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --no-access-log
+# APP_MODULE=control.main:app runs the control room (the status site) from the same image
+CMD exec uvicorn ${APP_MODULE:-app.main:app} --host 0.0.0.0 --port ${PORT} --no-access-log

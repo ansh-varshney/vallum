@@ -34,6 +34,7 @@ windows:    { production_days: 30, demo_minutes: 60 }
 
 protected_paths:
   - vallum/
+  - control/                     # the control room (status site): Vallum's own instrument
   - .gitlab-ci.yml
   - .gitlab/duo/
   - skills/
@@ -100,4 +101,4 @@ agents:
 credits:
   daily_code_started_sessions: 40   # more than this in a day turns Safe mode on (credit guard, FR-WD-4)
 
-cloud_run: { service: vallum, region: us-central1, max_scale_cap: 5, project: vallum-512306 }
+cloud_run: { service: vallum, status_service: vallum-status, region: us-central1, max_scale_cap: 5, project: vallum-512306 }

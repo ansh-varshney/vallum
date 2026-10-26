@@ -1,44 +1,35 @@
-# Feature Card: the public status page.
+# Feature Card: the old status address. The status pages moved to their own site, the Vallum control room (a separate
+# Cloud Run service, vallum-status, deployed by the control-room job); /status forwards there so old links keep working.
 feature: status-page
 issue: null
 kind: ui-page
 tier: standard
 priority: P2
 owns:
-  routes: ["GET /status", "GET /status/rules", "GET /status/live.json"]
-  files: [app/features/status.py, app/ui.py]
+  routes: ["GET /status", "GET /status/{rest:path}"]
+  files: [app/features/status.py]
 flag: null
 promises:
   behavior:
-    - id: status-renders
-      says: "The status page loads and says that visitors are simulated"
-      steps: ["GET /status -> 200 contains Visitors are simulated"]
+    - id: status-forwards
+      says: "The old status address forwards to the control room"
+      steps: ["GET /status -> 302 https://vallum-status-256944994567.us-central1.run.app/"]
       where: [mr, drive, live]
       severity: major
-    - id: status-shows-promises
-      says: "The status page shows the mistake allowance and every feature's promises"
-      steps: ["GET /status -> 200 contains Features and their promises"]
-      where: [mr, drive, live]
-      severity: major
-    - id: status-rules-page
-      says: "The rules page shows the repo's Rulebook, policy and code map, read-only"
-      steps: ["GET /status/rules -> 200 contains Rules and code"]
-      where: [mr, drive, live]
-      severity: minor
-    - id: status-live-feed
-      says: "The live feed for the release lane answers JSON"
-      steps: ["GET /status/live.json -> 200 json drive"]
+    - id: status-rules-forward
+      says: "The old rules address forwards to the control room's rules"
+      steps: ["GET /status/rules -> 302 https://vallum-status-256944994567.us-central1.run.app/rules"]
       where: [mr, drive, live]
       severity: minor
   speed:
     - id: status-fast
-      says: "95% of status page loads finish in under 800 ms"
-      measure: "p95(latency, route='GET /status') < 800ms"
+      says: "95% of status forwards finish in under 500 ms"
+      measure: "p95(latency, route='GET /status') < 500ms"
       where: [mr, drive]
       severity: minor
   security:
     - id: status-no-secrets
-      says: "The status page never reads the secrets document"
+      says: "The status forward never reads the secrets document"
       static: {file_lacks: [app/features/status.py, "vallum_secrets"]}
       where: [mr]
       severity: blocker

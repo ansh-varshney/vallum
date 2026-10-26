@@ -2,6 +2,7 @@
 
     python -m vallum.drive release        deploy at 0%, step 0, the tier's traffic steps, promote or roll back
     python -m vallum.drive rollback-now   instant rollback to the last good revision (manual job, no variables)
+    python -m vallum.drive control-room   deploy the control room (the status site) on its own service and address
 
 Every step writes a verdict report, updates the state store and tells the change owner (FR-DRIVE-4).
 """
@@ -637,7 +638,8 @@ class Drive:
         self.clear_labels(mr_iid, issue_iid)
         self.release_carried(info, rid, new_rev)
         self.status(mr_iid, "Released 100%", "done", note=new_rev,
-                    now=f"Live for everyone. [Open the app]({self.url}/status).", action="nothing.")
+                    now=f"Live for everyone. [Open the app]({self.url}/) · [control room]({config.status_url(self.pol)}).",
+                    action="nothing.")
         if mr_iid:
             self.notify.alert(MR, int(mr_iid), "Released", author=info.get("author"),
                               what=f"{info.get('title')} is live for 100% of visitors ({rid}, revision `{new_rev}`).",
@@ -734,6 +736,26 @@ class Drive:
         return 1
 
 
+def control_room() -> int:
+    """Deploy the control room (the status site) from the image just built, on its own service and address with all
+    traffic at once. It is Vallum's own instrument and reads only public state, so it isn't test-driven like the app;
+    the app's /status forwards to it."""
+    pol = config.policy()
+    image = os.environ.get("IMAGE")
+    if not image:
+        log("no image was built in this pipeline: the control room stays as it is")
+        return 0
+    cr = pol["cloud_run"]
+    service = cr.get("status_service", "vallum-status")
+    run = CloudRun(gcp.session(), cr["project"], cr["region"], service)
+    rev = f"{service}-{os.environ.get('CI_COMMIT_SHA', 'local')[:7]}-{os.environ.get('CI_PIPELINE_ID', '0')}"
+    env = {"APP_MODULE": "control.main:app", "GOOGLE_CLOUD_PROJECT": cr["project"], "APP_URL": config.service_url(pol)}
+    run.deploy(image, rev, [{"revisionName": rev, "percent": 100}], env)
+    run.ensure_public()
+    log(f"control room {rev} serves {config.status_url(pol)}")
+    return 0
+
+
 def rollback_now() -> int:
     """The owner's emergency button: run the manual job `rollback-now` in any main pipeline."""
     pol = config.policy()
@@ -796,6 +818,8 @@ def main():
         sys.exit(Drive().release())
     if cmd == "rollback-now":
         sys.exit(rollback_now())
+    if cmd == "control-room":
+        sys.exit(control_room())
     raise SystemExit(f"unknown command {cmd}")
 
 

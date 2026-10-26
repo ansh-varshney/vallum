@@ -1,6 +1,6 @@
-"""Layer 4: the public status page and what code publishes for it."""
+"""Layer 4: the control room (the status site), the app's pages, and what code publishes for them."""
 
-from app.features import status
+from control import views
 from vallum import public
 from vallum.cards import CardSet
 from vallum.state import MemoryState, Store
@@ -49,32 +49,41 @@ def _data(**over):
     return data
 
 
-def test_status_page_shows_tiers_features_promises_and_events():
-    page = status.render(_data(), "vallum-fb2ef06")
-    assert "Visitors are simulated" in page                        # the card's live promise
-    assert "90% left" in page and "2 bad of 460 visits; 20 allowed in the last 60 min" in page and "no visits in the last 60 min" in page
-    assert "Last release: r-0017 (redirect)" in page and "!17 Housekeeping" in page
-    assert "broken in production" in page and 'class="fcard tier-core broken"' in page
-    assert '<details class="plist" open>' in page                   # a broken card opens its promises by itself
-    assert "2/3</b> promises kept" in page and "behavior 1" in page
-    assert "3 promises · 2 kept · 1 broken" in page
-    assert "kept in test drive r-0017 at 50%: 47 ms (limit 150 ms, n=626)" in page
-    assert "kept on its merge request" in page
-    assert "A known code &lt;b&gt;redirects&lt;/b&gt;" in page and "<b>redirects</b>" not in page
-    assert 'href="https://gitlab.example/p/-/issues/9"' in page and "not shown" not in page
-    assert "Circuit breaker 0 of 3 rollbacks in 6 h" in page
+def test_control_room_pages_show_tiers_features_promises_and_events():
+    data = _data()
+    features = views.features_page(data["public"], {})
+    assert 'class="fcard core broken"' in features and "2 of 3 promises kept" in features and "1 broken" in features
+    assert 'href="/features/redirect"' in features and "behavior 1" in features
+    card = views.feature_page(data["public"], {}, "redirect")
+    assert "Broken in production" in card and "Kept in test drive r-0017 at 50%: 47 ms (limit 150 ms, n=626)" in card
+    assert "Kept on its merge request" in card
+    assert "A known code &lt;b&gt;redirects&lt;/b&gt;" in card and "<b>redirects</b>" not in card
+    assert views.feature_page(data["public"], {}, "nope") is None
+    allowance = views.allowance(data)
+    assert "90%" in allowance and "2 bad of 460 visits; 20 allowed in the last 60 min" in allowance
+    assert "No visits in the last 60 min" in allowance
+    releases = views.releases(data, {"drive": {}, "release": {}, "project_url": ""})
+    assert "Last release: r-0017 (redirect)" in releases and "!17 Housekeeping" in releases
+    assert 'href="https://gitlab.example/p/-/issues/9"' in releases and "not shown" not in releases
+    assert "Circuit breaker 0 of 3" in releases
+    overview = views.overview(data, {"drive": {}, "release": {}, "project_url": ""}, {})
+    assert "A promise is broken in production" in overview and "2<small> / 3</small>" in overview
 
 
-def test_status_page_renders_with_nothing_published_and_in_safe_mode():
-    empty = {name: {} for name in status.DOCS}
-    page = status.render(empty, "local")
-    assert "Visitors are simulated" in page and "publishes the live features" in page and "No releases yet" in page
-    safe = status.render(_data(meta={"safe_mode": True, "safe_mode_reason": "circuit breaker: 3 rollbacks within 6 h",
-                                     "rollbacks": ["2099-01-01T00:00:00Z"]},
-                               release={"slot": "driving", "release_id": "r-0020", "feature": "qr", "step": 10}), "x")
-    assert "Safe mode ON" in safe and "circuit breaker: 3 rollbacks within 6 h" in safe
-    assert "Test drive r-0020 (qr): 10% of visitors on the new version." in safe
-    assert "Circuit breaker 1 of 3" in safe
+def test_control_room_renders_with_nothing_published_and_in_safe_mode():
+    empty = {name: {} for name in ("release", "modes", "recent", "queue", "meta", "public", "security", "flags")}
+    nothing = {"drive": {}, "release": {}, "project_url": ""}
+    assert "Every live promise is kept" in views.overview(empty, nothing, {})
+    assert "publishes the live features" in views.features_page({}, {})
+    assert "No releases yet" in views.releases(empty, nothing)
+    assert "triages scanner findings" in views.security({}, "")
+    safe = _data(meta={"safe_mode": True, "safe_mode_reason": "circuit breaker: 3 rollbacks within 6 h",
+                       "rollbacks": ["2099-01-01T00:00:00Z"]},
+                 release={"slot": "driving", "release_id": "r-0020", "feature": "qr", "step": 10})
+    page = views.releases(safe, nothing)
+    assert "Safe mode ON" in page and "circuit breaker: 3 rollbacks within 6 h" in page
+    assert "Test drive r-0020 (qr): 10% of visitors on the new version." in page and "Circuit breaker 1 of 3" in page
+    assert "Safe mode: nothing ships" in views.overview(safe, nothing, {})
 
 
 def test_container_scan_counts_only_fixable_findings_when_asked(tmp_path):
@@ -150,9 +159,10 @@ def test_security_triage_decides_every_finding_and_opens_one_fix_issue_per_real_
     assert sec["open"] == 5 and sec["counts"]["real"] == 1
     ledger = render_ledger({}, {}, {}, [], [], security=sec)
     assert "Security findings on main (triaged by code)" in ledger and "fix #77" in ledger
-    page = status.security_html(sec)
-    assert "5 open findings" in page and "1 real" in page and "simulate/visitors.py" not in page   # counts only
-    assert "triages scanner findings on its next run" in status.security_html({})
+    page = views.security(sec, "")
+    assert '<div class="secbig">5</div>' in page and "1 real: fix issues opened" in page
+    assert "simulate/visitors.py" not in page                                              # counts only
+    assert "triages scanner findings on its next run" in views.security({}, "")
 
 
 def test_security_fetch_pages_and_ledger_groups_image_findings():
@@ -307,7 +317,7 @@ def test_a_housekeeping_mr_is_announced_to_the_requester():
 
 
 def test_markdown_and_yaml_copies_are_escaped():
-    from app.ui import markdown, yaml_html
+    from control.ui import markdown, yaml_html
 
     out = markdown("# Rules\n\nNever <script>alert(1)</script> **bold** and `code` [map](docs/x.md)\n\n"
                    "| a | b |\n|---|---|\n| <i>1</i> | 2 |\n\n- one\n- two\n\n```\n<b>raw</b>\n```", "https://g/p/-/blob/main")
@@ -318,40 +328,56 @@ def test_markdown_and_yaml_copies_are_escaped():
     assert '<span class="k">owners</span>' in y and '<span class="c"># who owns the rules</span>' in y and "&lt;x&gt;" in y
 
 
-def test_rules_page_shows_the_repo_copies_read_only():
+def test_rules_pages_show_the_repo_copies_read_only_one_document_each():
     docs = {"files": [{"path": "vallum/RULEBOOK.md", "title": "Rulebook", "format": "md", "text": "# Rulebook\n\n- one rule"},
                       {"path": "vallum/policy.yaml", "title": "Policy", "format": "yaml", "text": "demo: true"}],
             "commit": "abcdef1234", "at": "2026-10-26T08:00:00Z"}
-    page = status.render_rules(docs, "rev", "https://g/p")
+    page = views.rules(docs, "https://g/p", None)
     assert "Rules and code" in page and "Read-only copy of <b>main</b> at abcdef12" in page
     assert 'href="https://g/p/-/blob/main/vallum/RULEBOOK.md"' in page and "<li>one rule</li>" in page
-    assert '<span class="k">demo</span>' in page
-    assert "publishes a copy" in status.render_rules({}, "rev")
+    assert 'href="/rules/policy"' in page and '<span class="k">demo</span>' not in page   # one document per page
+    assert '<span class="k">demo</span>' in views.rules(docs, "https://g/p", "policy")
+    assert views.rules(docs, "", "nope") is None
+    assert "publishes a copy" in views.rules({}, "", None)
 
 
-def test_home_page_and_status_routes_answer(monkeypatch):
+def test_app_home_and_old_status_address_and_control_room_routes(monkeypatch):
+    from pathlib import Path
+
     from fastapi.testclient import TestClient
 
     from app import flags as appflags
     from app.main import create_app
     from app.store import MemoryStore
+    from control.main import create_app as control_app
 
     appflags._cache["at"] = 0.0
-    store = MemoryStore()
-    store.write_doc("vallum_state", "drive_live", {"phase": "traffic", "pct": 10, "release_id": "r-9", "log": ["x"]})
-    client = TestClient(create_app(store))
+    client = TestClient(create_app(MemoryStore()), follow_redirects=False)
     home = client.get("/")
     assert home.status_code == 200 and "Shorten a link" in home.text and "Served by version" in home.text
     assert "vallum_secrets" not in home.text and home.headers["cache-control"] == "no-store"
-    status._cache["at"] = status._live_cache["at"] = 0.0
-    live = client.get("/status/live.json").json()
-    assert live["drive"]["pct"] == 10 and set(live["release"]) >= {"slot", "release_id"}
-    page = client.get("/status")
-    assert page.status_code == 200 and "Features and their promises" in page.text and "Visitors are simulated" in page.text
-    assert '"pct": 10' in page.text                                  # the live lane starts from the embedded data
-    assert client.get("/status/rules").status_code == 200
+    assert "vallum-status-256944994567.us-central1.run.app" in home.text           # links to the control room
+    moved = client.get("/status")
+    assert moved.status_code == 302 and moved.headers["location"] == "https://vallum-status-256944994567.us-central1.run.app/"
+    assert client.get("/status/rules").headers["location"].endswith(".run.app/rules")
     monkeypatch.setenv("APP_FLAGS_OFF", "home")
     assert client.get("/").status_code == 404                         # the home page has its own kill switch
+
+    store = MemoryStore()
+    store.write_doc("vallum_state", "drive_live", {"phase": "traffic", "pct": 10, "release_id": "r-9", "log": ["x"]})
+    data = _data()
+    store.write_doc("vallum_state", "public", data["public"])
+    store.write_doc("vallum_state", "docs", {"files": [{"path": "vallum/policy.yaml", "title": "Policy", "format": "yaml", "text": "a: 1"}]})
+    room = TestClient(control_app(store))
+    assert room.get("/live.json").json()["drive"]["pct"] == 10
+    overview = room.get("/")
+    assert overview.status_code == 200 and "Visitors are simulated" in overview.text and '"pct": 10' in overview.text
+    for path in ("/releases", "/features", "/features/redirect", "/allowance", "/security", "/rules", "/rules/policy", "/health"):
+        assert room.get(path).status_code == 200, path
+    assert room.get("/features/nope").status_code == 404 and room.get("/rules/nope").status_code == 404
+    assert 'class="on" aria-current=page>Features' in room.get("/features/redirect").text
+    for source in Path("control").glob("*.py"):
+        assert "vallum_secrets" not in source.read_text(encoding="utf-8")           # the control room never reads secrets
 
 
 def test_a_cold_start_at_a_step_is_warm_up_not_a_broken_promise():

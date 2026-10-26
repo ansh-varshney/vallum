@@ -121,7 +121,12 @@ def running_stale_code(gl) -> str | None:
     return head if head and head != sha else None
 
 
-def service_url(pol: Policy) -> str:
+def service_url(pol: Policy, service: str | None = None) -> str:
     cr = pol["cloud_run"]
     number = os.environ.get("GCP_PROJECT_NUMBER", "256944994567")
-    return f"https://{cr['service']}-{number}.{cr['region']}.run.app"
+    return f"https://{service or cr['service']}-{number}.{cr['region']}.run.app"
+
+
+def status_url(pol: Policy) -> str:
+    """The control room (the status site): its own Cloud Run service and address."""
+    return service_url(pol, pol["cloud_run"].get("status_service", "vallum-status"))

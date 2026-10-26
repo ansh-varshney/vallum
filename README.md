@@ -7,10 +7,10 @@ allowance permits. Agents write code, promises and explanations; **code decides 
 Built for the GitLab Transcend "Life After Code" hackathon (Path A, Hands-off).
 
 - **The app** (a small link shortener on Google Cloud Run): <https://vallum-256944994567.us-central1.run.app/>
-- **Live status page**: <https://vallum-256944994567.us-central1.run.app/status> (a live lane for the release being
-  test-driven, every feature as a card with its promises, the queue, allowances) and
-  [rules and code](https://vallum-256944994567.us-central1.run.app/status/rules) (read-only copies of the Rulebook,
-  policy and code map)
+- **The control room** (Vallum's status site, its own Cloud Run service): <https://vallum-status-256944994567.us-central1.run.app/>: one page per topic:
+  [releases](https://vallum-status-256944994567.us-central1.run.app/releases) with a live lane for the release being test-driven, [features](https://vallum-status-256944994567.us-central1.run.app/features) as cards
+  with their promises, the [mistake allowance](https://vallum-status-256944994567.us-central1.run.app/allowance), [security](https://vallum-status-256944994567.us-central1.run.app/security), and
+  [rules and code](https://vallum-status-256944994567.us-central1.run.app/rules) (read-only copies of the Rulebook, policy and code map)
 - **The Ledger** (Vallum's state, rewritten by code): [issue #3](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3)
 - **Every run, in the open**: [pipelines](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines)
 
@@ -62,10 +62,10 @@ Every row links to a real run on this project.
 | **Create** | Code and tests written; reviewed against the Rulebook and the card; doubts become watch promises | Builder, Reviewer, GitLab Duo Code Review | [!14 link preview, built by agents](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests/14) · [!5 Duo's requested changes answered in fix mode](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests/5) |
 | **Verify** | Promises judged on a localhost copy; fail-first; broken pipelines repaired; the Inspector checks the work against the request | Promise checker, Pipeline Medic, Inspector | [!13 Medic repair, Inspector "matches", 12/12](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests/13) · [!18 refused 11/12 on the Inspector's "gaps"](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests/18) |
 | **Package** | Image built, copied to the project registry and scanned; step 0 judges its size and its fixable criticals before any visitor | Build job, GitLab container scanning, test drive | [main pipeline with build and container scan](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines/2986328366) |
-| **Secure** | SAST, secret detection and container scanning; new high or critical findings block merges (rule 8); every open finding gets a decision by code | Gatekeeper, security triage, Security guardian | [Ledger: security findings](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3) · [status page: Security](https://vallum-256944994567.us-central1.run.app/status) |
+| **Secure** | SAST, secret detection and container scanning; new high or critical findings block merges (rule 8); every open finding gets a decision by code | Gatekeeper, security triage, Security guardian | [Ledger: security findings](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3) · [control room: Security](https://vallum-status-256944994567.us-central1.run.app/security) |
 | **Release** | Step up or roll back at each test-drive step; release notes; requests closed when live | Test-drive controller (code), Release Captain | [r-0012: step 0 replay, 1% → 10% → 50% → 100%](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines/2985841685) · [r-0006 rolled back at 1%](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/5) |
 | **Configure** | Traffic split per step; Cloud Run settings as code; emergency rollback | Test-drive controller, `rollback-now` | [`deploy/service.yaml`](deploy/service.yaml) · [`rollback-now` run that tripped the circuit breaker](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/jobs/17444987185) |
-| **Monitor** | Live promises judged every patrol; allowances spent; modes changed; incidents, postmortems and learned promises | Live Patrol, Incident Commander, Notifier | [incident #5 → learned promise !12](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/5) · [status page](https://vallum-256944994567.us-central1.run.app/status) |
+| **Monitor** | Live promises judged every patrol; allowances spent; modes changed; incidents, postmortems and learned promises | Live Patrol, Incident Commander, Notifier | [incident #5 → learned promise !12](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/5) · [control room](https://vallum-status-256944994567.us-central1.run.app/) |
 | **Govern** | 12 Gatekeeper rules; one merge path; provenance gate; circuit breaker; every override recorded | Gatekeeper, Merge Desk, provenance gate, Watchdog | [an unsanctioned push stopped](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines/2986301320) · [!17 merged 12/12 by the desk](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests/17) |
 
 ## The agents (Layer 2)
@@ -153,7 +153,8 @@ reads Python by AST and JavaScript/TypeScript/Go/Java by pattern (see the Expres
 
 | Path | What it is |
 |---|---|
-| `app/` | FastAPI link shortener; one module per feature in `app/features/` (home page, links, redirects, status page…); shared look in `app/ui.py` |
+| `app/` | FastAPI link shortener; one module per feature in `app/features/` (home page, links, redirects…); its look in `app/ui.py` |
+| `control/` | The control room: Vallum's status site, deployed from the same image to its own service (`vallum-status`) by the `control-room` job; reads only public state |
 | `promises/` | Feature Cards, app-wide promises (`service.yaml`), learned promises |
 | `vallum/` 🔒 | Rulebook, policy, catalog, card schema and all of Vallum's code |
 | `vallum/checker/` | Promise checker (steps, measure, static, scan) and fail-first check |
@@ -166,7 +167,7 @@ reads Python by AST and JavaScript/TypeScript/Go/Java by pattern (see the Expres
 | `vallum/agents.py` | Starts agents by member-only actions; credit guard |
 | `vallum/codemap/`, `vallum/housekeeping.py` | Code map generator; post-release housekeeping MR |
 | `vallum/notify/` | Status comments, alerts, Ledger |
-| `vallum/public.py` | The public summary the status page shows (written by code, no secrets) |
+| `vallum/public.py` | The public summary the control room shows (written by code, no secrets) |
 | `vallum/security.py` | Security triage: a decision by code for every open scanner finding |
 | `vallum/flows/` | Publishes the flows and keeps their triggers |
 | `vallum/evidence/` | Evidence bundle for the Inspector (primary data only) |
@@ -179,7 +180,7 @@ reads Python by AST and JavaScript/TypeScript/Go/Java by pattern (see the Expres
 
 ## Google Cloud
 
-Cloud Run (the app and its public status page; revisions, tags, traffic split, min instances 0), Artifact
+Cloud Run (the app, and the control room on its own service; revisions, tags, traffic split, min instances 0), Artifact
 Registry, Firestore (app data and the state store), and Workload Identity Federation from protected `main` pipelines only. No key files exist.
 **Visitors are simulated** by CI jobs during the hackathon; nothing runs on Google Cloud between drives.
 

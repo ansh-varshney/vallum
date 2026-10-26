@@ -48,7 +48,6 @@ def test_every_response_names_revision_and_route(client):
     assert client.get("/r/zzz").headers["x-route"] == "GET /r/{code}"
 
 
-def test_status_page(client):
+def test_the_old_status_address_forwards_to_the_control_room(client):
     r = client.get("/status")
-    assert r.status_code == 200
-    assert "Visitors are simulated" in r.text
+    assert r.status_code == 302 and r.headers["location"].startswith("https://vallum-status-")

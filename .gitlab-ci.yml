@@ -2,7 +2,7 @@
 # and the deploy provenance gate refuses to deploy anything that skipped these jobs.
 #
 #   MR pipelines (no tokens, no cloud):  unit tests · promise checker on localhost · SAST · secrets · Gatekeeper report
-#   main push / API pipelines:           provenance gate · unit tests · scans · build and scan image · test drive · Merge Desk
+#   main push / API pipelines:           provenance gate · unit tests · scans · build and scan image · test drive · control room · Merge Desk
 #   main schedule / web pipelines:       Live Patrol (Watchdog, Ledger) · Merge Desk
 #   any main pipeline:                   rollback-now (manual, needs no variables)
 
@@ -149,7 +149,7 @@ build-image:
     DOCKER_TLS_CERTDIR: "/certs"
   rules:
     - <<: *if_release
-      changes: [app/**/*, Dockerfile, requirements.txt, deploy/**/*]
+      changes: [app/**/*, control/**/*, Dockerfile, requirements.txt, deploy/**/*]
   needs: [provenance-gate, unit-tests]
   script:
     - apk add --no-cache curl jq > /dev/null
@@ -182,7 +182,7 @@ container_scanning:
   needs: [build-image]
   rules:
     - <<: *if_release
-      changes: [app/**/*, Dockerfile, requirements.txt, deploy/**/*]
+      changes: [app/**/*, control/**/*, Dockerfile, requirements.txt, deploy/**/*]
   variables:
     CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
   allow_failure: true
@@ -200,12 +200,28 @@ test-drive:
     - { job: container_scanning, optional: true }
   environment:
     name: production
-    url: https://vallum-256944994567.us-central1.run.app/status
+    url: https://vallum-256944994567.us-central1.run.app/
   script:
     - python -m vallum.drive release
   artifacts:
     when: always
     paths: [reports/]
+
+# The control room (the status site) runs the same image on its own service and address. It is Vallum's own
+# instrument and reads only public state, so it goes live at once after the build; the app is what gets test-driven.
+control-room:
+  stage: drive
+  extends: [.python, .gcp]
+  rules:
+    - <<: *if_release
+      changes: [app/**/*, control/**/*, Dockerfile, requirements.txt, deploy/**/*]
+  needs: [provenance-gate, build-image]
+  allow_failure: true
+  environment:
+    name: control-room
+    url: https://vallum-status-256944994567.us-central1.run.app/
+  script:
+    - python -m vallum.drive control-room
 
 rollback-now:
   stage: drive
