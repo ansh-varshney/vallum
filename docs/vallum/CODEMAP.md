@@ -20,6 +20,7 @@ A link shortener for small businesses: create short links, redirect visitors, se
 | custom-alias | standard | new-endpoint | `POST /api/aliases` | `app/features/custom_alias.py`<br>`tests/test_custom_alias.py` | custom_alias | behavior: alias-redirects, alias-taken-is-refused, alias-valid-chars-only, alias-url-must-be-http, alias-url-length-limit, alias-create-needs-key, alias-response-shape; reliability: alias-create-reliable; security: alias-sec-needs-key, alias-chars-only, alias-max-length, alias-no-path-traversal, alias-url-http-only, alias-url-no-ftp, alias-url-max-length, alias-no-secrets, alias-no-open-redirect; speed: alias-create-fast |
 | health | standard | config-infra | `GET /health` | `app/features/health.py` | - | cost: health-no-store; operability: health-reports-revision; speed: health-fast |
 | home | standard | ui-page | `GET /` | `app/features/home.py`<br>`app/ui.py` | home | behavior: home-renders, home-shows-version; security: home-no-secrets; speed: home-fast |
+| limits | standard | new-endpoint | `GET /api/limits` | `app/features/limits.py`<br>`tests/test_limits.py` | limits | behavior: limits-returns-constants, limits-public-no-key; reliability: limits-reliable; security: limits-no-api-key-required, limits-no-secrets, limits-no-ip-logging, limits-constant-response, limits-no-request-body, limits-no-path-parameters, limits-no-query-parameters; speed: limits-fast |
 | link-exists | standard | new-endpoint | `GET /api/links/{code}/exists` | `app/features/link_exists.py`<br>`tests/test_link_exists.py` | link_exists | behavior: link-exists-true, link-exists-false, link-exists-no-url, link-exists-odd-code; reliability: link-exists-reliable; security: link-exists-no-url-leak, link-exists-odd-codes-safe, link-exists-long-codes-safe, link-exists-no-secrets, link-exists-public-no-key; speed: link-exists-fast |
 | link-preview | experimental | ui-page | `GET /p/{code}` | `app/features/link_preview.py`<br>`tests/test_link_preview.py` | link_preview | behavior: link-preview-shows-destination, link-preview-unknown-404, link-preview-no-secrets, link-preview-odd-code-404; security: preview-no-secrets, preview-no-api-key, preview-rejects-odd-codes, preview-html-escapes-destination; speed: link-preview-fast |
 | links | standard | new-endpoint | `POST /api/links`<br>`GET /api/links/{code}`<br>`DELETE /api/links/{code}` | `app/features/links.py` | - | behavior: link-create-read, link-delete; reliability: link-api-reliable; security: link-create-needs-key, link-http-only, link-url-well-formed; speed: link-details-fast |
@@ -46,6 +47,10 @@ A link shortener for small businesses: create short links, redirect visitors, se
 ### `app/features/home.py` (python, 161 lines) · feature **home**
 - route `GET / -> home()`
 - def `home(request) :123`
+
+### `app/features/limits.py` (python, 16 lines) · feature **limits**
+- route `GET /api/limits -> limits()`
+- def `limits() :14`
 
 ### `app/features/link_exists.py` (python, 22 lines) · feature **link-exists**
 - route `GET /api/links/{code}/exists -> link_exists()`
@@ -114,6 +119,7 @@ A link shortener for small businesses: create short links, redirect visitors, se
 |---|---|---|
 | `DELETE /api/links/{code}` | `app/features/links.py` | links |
 | `GET /` | `app/features/home.py` | home |
+| `GET /api/limits` | `app/features/limits.py` | limits |
 | `GET /api/links/{code}` | `app/features/links.py` | links |
 | `GET /api/links/{code}/exists` | `app/features/link_exists.py` | link-exists |
 | `GET /api/version` | `app/features/version.py` | version |
@@ -138,8 +144,9 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - `tests/test_gate.py`: 16 test(s)
 - `tests/test_gitlab_client.py`: 2 test(s)
 - `tests/test_layer2.py`: 12 test(s)
-- `tests/test_layer3.py`: 71 test(s)
-- `tests/test_layer4.py`: 17 test(s)
+- `tests/test_layer3.py`: 72 test(s)
+- `tests/test_layer4.py`: 19 test(s)
+- `tests/test_limits.py`: 9 test(s)
 - `tests/test_link_exists.py`: 12 test(s)
 - `tests/test_link_preview.py`: 10 test(s)
 - `tests/test_redirect.py`: 5 test(s)
