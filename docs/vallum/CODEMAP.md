@@ -43,9 +43,9 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - route `GET /health -> health()`
 - def `health(request) :9`
 
-### `app/features/home.py` (python, 149 lines) · feature **home**
+### `app/features/home.py` (python, 151 lines) · feature **home**
 - route `GET / -> home()`
-- def `home(request) :102`
+- def `home(request) :103`
 
 ### `app/features/link_exists.py` (python, 22 lines) · feature **link-exists**
 - route `GET /api/links/{code}/exists -> link_exists()`
@@ -156,7 +156,7 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - `tests/test_gitlab_client.py`: 2 test(s)
 - `tests/test_layer2.py`: 12 test(s)
 - `tests/test_layer3.py`: 71 test(s)
-- `tests/test_layer4.py`: 15 test(s)
+- `tests/test_layer4.py`: 16 test(s)
 - `tests/test_link_exists.py`: 12 test(s)
 - `tests/test_link_preview.py`: 10 test(s)
 - `tests/test_redirect.py`: 5 test(s)
