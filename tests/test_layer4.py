@@ -54,10 +54,12 @@ def test_status_page_shows_tiers_features_promises_and_events():
     assert "Visitors are simulated" in page                        # the card's live promise
     assert "90% left" in page and "2 bad of 460 visits; 20 allowed in the last 60 min" in page and "no visits in the last 60 min" in page
     assert "Last release: r-0017 (redirect)" in page and "!17 Housekeeping" in page
-    assert "broken in production" in page and "<details open>" in page    # a broken feature opens by itself
-    assert "3 promises · 1 kept · 1 broken" in page
+    assert "broken in production" in page and 'class="fcard tier-core broken"' in page
+    assert '<details class="plist" open>' in page                   # a broken card opens its promises by itself
+    assert "2/3</b> promises kept" in page and "behavior 1" in page
+    assert "3 promises · 2 kept · 1 broken" in page
     assert "kept in test drive r-0017 at 50%: 47 ms (limit 150 ms, n=626)" in page
-    assert "checked on every merge request" in page
+    assert "kept on its merge request" in page
     assert "A known code &lt;b&gt;redirects&lt;/b&gt;" in page and "<b>redirects</b>" not in page
     assert 'href="https://gitlab.example/p/-/issues/9"' in page and "not shown" not in page
     assert "Circuit breaker 0 of 3 rollbacks in 6 h" in page
@@ -302,3 +304,51 @@ def test_a_housekeeping_mr_is_announced_to_the_requester():
     assert "opened !23" in notes[0][2] and "refreshes the code map" in notes[0][2] and "expired" not in notes[0][2]
     assert statuses == [(22, "Housekeeping", "running", "!23")]
     assert d.store.timeline("merge_requests-23")["housekeeping_for"] == {"mr": 22, "issue": 10, "release": "r-0024"}
+
+
+def test_markdown_and_yaml_copies_are_escaped():
+    from app.ui import markdown, yaml_html
+
+    out = markdown("# Rules\n\nNever <script>alert(1)</script> **bold** and `code` [map](docs/x.md)\n\n"
+                   "| a | b |\n|---|---|\n| <i>1</i> | 2 |\n\n- one\n- two\n\n```\n<b>raw</b>\n```", "https://g/p/-/blob/main")
+    assert "<script>" not in out and "&lt;script&gt;" in out and "<b>bold</b>" in out and "<code>code</code>" in out
+    assert 'href="https://g/p/-/blob/main/docs/x.md"' in out and "<table>" in out and "&lt;i&gt;1&lt;/i&gt;" in out
+    assert "<ul><li>one</li><li>two</li></ul>" in out and "&lt;b&gt;raw&lt;/b&gt;" in out
+    y = yaml_html('owners: [a]   # who owns the rules\nsays: "<x>"')
+    assert '<span class="k">owners</span>' in y and '<span class="c"># who owns the rules</span>' in y and "&lt;x&gt;" in y
+
+
+def test_rules_page_shows_the_repo_copies_read_only():
+    docs = {"files": [{"path": "vallum/RULEBOOK.md", "title": "Rulebook", "format": "md", "text": "# Rulebook\n\n- one rule"},
+                      {"path": "vallum/policy.yaml", "title": "Policy", "format": "yaml", "text": "demo: true"}],
+            "commit": "abcdef1234", "at": "2026-10-26T08:00:00Z"}
+    page = status.render_rules(docs, "rev", "https://g/p")
+    assert "Rules and code" in page and "Read-only copy of <b>main</b> at abcdef12" in page
+    assert 'href="https://g/p/-/blob/main/vallum/RULEBOOK.md"' in page and "<li>one rule</li>" in page
+    assert '<span class="k">demo</span>' in page
+    assert "publishes a copy" in status.render_rules({}, "rev")
+
+
+def test_home_page_and_status_routes_answer(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import flags as appflags
+    from app.main import create_app
+    from app.store import MemoryStore
+
+    appflags._cache["at"] = 0.0
+    store = MemoryStore()
+    store.write_doc("vallum_state", "drive_live", {"phase": "traffic", "pct": 10, "release_id": "r-9", "log": ["x"]})
+    client = TestClient(create_app(store))
+    home = client.get("/")
+    assert home.status_code == 200 and "Shorten a link" in home.text and "Served by version" in home.text
+    assert "vallum_secrets" not in home.text and home.headers["cache-control"] == "no-store"
+    status._cache["at"] = status._live_cache["at"] = 0.0
+    live = client.get("/status/live.json").json()
+    assert live["drive"]["pct"] == 10 and set(live["release"]) >= {"slot", "release_id"}
+    page = client.get("/status")
+    assert page.status_code == 200 and "Features and their promises" in page.text and "Visitors are simulated" in page.text
+    assert '"pct": 10' in page.text                                  # the live lane starts from the embedded data
+    assert client.get("/status/rules").status_code == 200
+    monkeypatch.setenv("APP_FLAGS_OFF", "home")
+    assert client.get("/").status_code == 404                         # the home page has its own kill switch

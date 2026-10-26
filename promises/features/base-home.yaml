@@ -1,0 +1,34 @@
+# Feature Card: the home page (shorten a link, check a code, recent links).
+feature: home
+issue: null
+kind: ui-page
+tier: standard
+priority: P2
+owns:
+  routes: ["GET /"]
+  files: [app/features/home.py, app/ui.py]
+flag: home
+promises:
+  behavior:
+    - id: home-renders
+      says: "The home page loads and offers to shorten a link"
+      steps: ["GET / -> 200 contains Shorten a link"]
+      where: [mr, drive, live]
+      severity: major
+    - id: home-shows-version
+      says: "The home page says which version of the app served it"
+      steps: ["GET / -> 200 contains Served by version"]
+      where: [mr, drive, live]
+      severity: minor
+  speed:
+    - id: home-fast
+      says: "95% of home page loads finish in under 500 ms"
+      measure: "p95(latency, route='GET /') < 500ms"
+      where: [mr, drive]
+      severity: minor
+  security:
+    - id: home-no-secrets
+      says: "The home page never reads the secrets document; the owner key stays in the owner's browser"
+      static: {file_lacks: [app/features/home.py, "vallum_secrets"]}
+      where: [mr]
+      severity: blocker

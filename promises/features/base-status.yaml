@@ -5,8 +5,8 @@ kind: ui-page
 tier: standard
 priority: P2
 owns:
-  routes: ["GET /status"]
-  files: [app/features/status.py]
+  routes: ["GET /status", "GET /status/rules", "GET /status/live.json"]
+  files: [app/features/status.py, app/ui.py]
 flag: null
 promises:
   behavior:
@@ -20,6 +20,16 @@ promises:
       steps: ["GET /status -> 200 contains Features and their promises"]
       where: [mr, drive, live]
       severity: major
+    - id: status-rules-page
+      says: "The rules page shows the repo's Rulebook, policy and code map, read-only"
+      steps: ["GET /status/rules -> 200 contains Rules and code"]
+      where: [mr, drive, live]
+      severity: minor
+    - id: status-live-feed
+      says: "The live feed for the release lane answers JSON"
+      steps: ["GET /status/live.json -> 200 json drive"]
+      where: [mr, drive, live]
+      severity: minor
   speed:
     - id: status-fast
       says: "95% of status page loads finish in under 800 ms"

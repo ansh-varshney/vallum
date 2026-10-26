@@ -7,8 +7,10 @@ Every step writes a verdict report, updates the state store and tells the change
 """
 
 import asyncio
+import collections
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -32,8 +34,13 @@ MR = "merge_requests"
 REPORTS = Path("reports")
 
 
+_LOG = collections.deque(maxlen=40)
+
+
 def log(msg: str):
-    print(f"[drive {utcnow().strftime('%H:%M:%S')}] {msg}", flush=True)
+    line = f"[drive {utcnow().strftime('%H:%M:%S')}] {msg}"
+    print(line, flush=True)
+    _LOG.append(re.sub(r"https?://\S+", "[address]", line))   # the status page shows these; no addresses
 
 
 def wait_serving(url: str, revision: str, streak: int = 15, timeout: float = 180, get=None, sleep=time.sleep,
@@ -80,7 +87,21 @@ class Drive:
         self.cards = cardlib.load_from_dir(config.ROOT)
         self.report = {"steps": []}
         self.skip_routes, self.reenable = set(), []
+        self._live = {}
         REPORTS.mkdir(exist_ok=True)
+
+    def live(self, **fields):
+        """What the status page's live lane shows (vallum_state/drive_live): the phase, traffic share, visits,
+        each step's result and the last log lines. Public facts only; a failed write never affects the release."""
+        self._live.update(fields)
+        self._live.update(updated_at=iso(), log=list(_LOG)[-30:])
+        try:
+            self.store.b.put("vallum_state", "drive_live", dict(self._live))
+        except Exception as exc:
+            print(f"[drive] live progress not saved: {exc}", flush=True)
+
+    def live_step(self, entry: dict):
+        self.live(verdicts=list(self._live.get("verdicts") or []) + [entry])
 
     # ---------------------------------------------------------------- helpers
     def api_key(self) -> str:
@@ -410,6 +431,10 @@ class Drive:
             log(f"release slot busy: {exc}")
             return 1
         self.report.update(release=rid, mr=mr_iid, tier=tier, mode=mode, features=names, image=image, steps_planned=steps)
+        self._live = {}
+        self.live(release_id=rid, feature=info.get("feature"), title=info.get("title"), tier=tier, mode=mode,
+                  steps=steps, mr_iid=mr_iid, author=info.get("author"), phase="starting", pct=0, started_at=iso(),
+                  finished_at=None, verdicts=[], watch_s=watch, result=None, reason=None)
         log(f"{rid}: tier {tier} ({mode.upper()}), steps {steps}, watch {watch:.0f}s, features {names or 'all'}")
         if info.get("owner_push"):
             self.audit(rid, {"by": "provenance", "result": "owner push (build phase override)"},
@@ -443,6 +468,7 @@ class Drive:
         log(f"deployed {new_rev} (old {old_rev}); private URL {cand_url}")
 
         # -- step 0: private URL, fresh test links, no visitor involved ---------------
+        self.live(phase="step0", pct=0, step_started_at=iso(), new_revision=new_rev, old_revision=old_rev)
         rows = self.package_rows([p for p in promises if p.style in ("static", "scan")])
         with core.client_for(cand_url, timeout=15) as client:
             for p in behave:
@@ -476,6 +502,7 @@ class Drive:
             worst = bad[0]
             return self.refuse(info, new_rev, old_rev, f"step 0: {worst['feature']}/{worst['id']} {worst['detail']}")
         self.audit(rid, {"by": "drive", "step": 0, "verdict": "kept", "visits": len(v.samples)})
+        self.live_step({"step": 0, "verdict": "kept", "visits": len(v.samples), "promises": len(rows)})
         self.status(mr_iid, "Step 0", "done", note=f"{len(rows)} promises kept",
                     now="Step 0 passed on the private address.")
         self.store.event("step", f"{rid} step 0 kept ({len(rows)} promises)", release_id=rid)
@@ -489,6 +516,7 @@ class Drive:
             if pct >= 100:
                 break
             self.store.set_release(step=pct)
+            self.live(phase="traffic", pct=pct, step_started_at=iso(), elapsed=0, visits=0, visits_new=0, worst=None)
             self.cr.set_traffic([{"revisionName": new_rev, "percent": pct, "tag": "cand"},
                                  {"revisionName": old_rev, "percent": 100 - pct}])
             self.status(mr_iid, f"{pct}%", "running", now=f"{pct}% of visitors are on the new version. Watching for {watch:.0f} s.")
@@ -510,6 +538,8 @@ class Drive:
                                          "allowance_counts": counts})
             self.save_report(rid)
             self.audit(rid, {"by": "drive", "step": pct, "verdict": verdict, "visits": len(samples)})
+            self.live_step({"step": pct, "verdict": verdict, "visits": len(samples),
+                            "visits_new": per_rev.get(new_rev, 0)})
             if verdict != judge.KEPT:
                 return self.rollback(info, new_rev, old_rev, pct, verdict, rows)
             carried = [r["id"] for r in rows if r.get("verdict") == judge.COLLECTING]
@@ -541,6 +571,9 @@ class Drive:
             w = judge.worst(rows)
             log(f"  {elapsed:5.0f}s {verdict:10} visits={len(v.samples)}"
                 + (f" worst={w['id']}: {w['detail']}" if w else ""))
+            await asyncio.to_thread(self.live, elapsed=round(elapsed), visits=len(v.samples), status=verdict,
+                                    visits_new=sum(1 for s in list(v.samples) if s.get("revision") == new_rev),
+                                    worst=f"{w['id']}: {w['detail']}" if w else None)
             if verdict in (judge.BROKEN, judge.AT_RISK) or (verdict == judge.KEPT and final):
                 break
         stop.set()
@@ -551,6 +584,7 @@ class Drive:
     def promote(self, info, new_rev, old_rev, first=False) -> int:
         rid, mr_iid = info["release_id"], info.get("mr_iid")
         self.confirm_live([{"revisionName": new_rev, "percent": 100, "tag": "cand"}], new_rev)
+        self.live(phase="released", pct=100, finished_at=iso(), result="released", new_revision=new_rev)
         for flag in self.reenable:
             try:
                 flags.switch(self.gl, self.store, flag, True)
@@ -627,6 +661,7 @@ class Drive:
         self.store.set_release(slot="idle", candidate=None, step=None, abort=False)
         flags.clear_for_revision(self.store, new_rev)
         self.audit(rid, {"by": "drive", "step": 0, "verdict": "refused", "why": why}, finished_at=iso(), outcome="refused at step 0")
+        self.live(phase="refused", pct=0, finished_at=iso(), result="refused at step 0", reason=why)
         self.store.event("refused", f"{rid} refused at step 0: {why[:120]}", release_id=rid)
         self.status(mr_iid, "Step 0", "failed", note="no visitor affected", now=f"Not released: {why}",
                     action="nothing yet; the fix goes through a new MR.")
@@ -653,6 +688,7 @@ class Drive:
         flags.clear_for_revision(self.store, new_rev)
         w = judge.worst(rows) or {}
         reason = "the owner ran rollback-now" if verdict == "aborted" else f"{w.get('feature')}/{w.get('id')} {verdict}: {w.get('detail')}"
+        self.live(phase="rolled_back", pct=0, finished_at=iso(), result="rolled back", reason=reason)
         self.audit(rid, {"by": "drive", "step": pct, "verdict": "rolled back", "why": reason, "seconds": round(took, 1)},
                    finished_at=iso(), outcome="rolled back")
         incident = None

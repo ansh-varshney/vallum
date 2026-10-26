@@ -162,6 +162,7 @@ class Patrol:
                                window_minutes=self.pol.window_minutes(), rolled_back=rolled_back,
                                breaker={"limit": int(self.pol["circuit_breaker"]["rollbacks"]),
                                         "hours": float(self.pol["circuit_breaker"]["within_hours"])})
+            public.record_docs(self.store, config.ROOT, os.environ.get("CI_COMMIT_SHA"))
         except Exception as exc:  # the status page must never break the patrol
             log(f"could not publish the status summary: {type(exc).__name__}: {exc}")
 

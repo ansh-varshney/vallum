@@ -77,7 +77,15 @@ class Desk:
         items += [f"!{m['iid']} {m['title']} · waiting for its pipeline" for m in waiting]
         items += [f"!{m['iid']} {m['title']} · pipeline failed" for m in failed]
         items += [f"!{m['iid']} {m['title']} · refused by the Gatekeeper (waits for a new commit)" for m in refused]
-        self.store.update("queue", lambda _cur: {"items": items, "at": iso()})
+
+        def entry(m, state, why=""):
+            return {"iid": m["iid"], "title": m["title"], "priority": self.level(m), "state": state, "why": why}
+
+        entries = [entry(m, "ready") for m in ready] + [entry(m, "paused", why) for m, why in paused]
+        entries += [entry(m, "needs a human") for m in held] + [entry(m, "waiting for its pipeline") for m in waiting]
+        entries += [entry(m, "pipeline failed") for m in failed]
+        entries += [entry(m, "refused", "waits for a new commit") for m in refused]
+        self.store.update("queue", lambda _cur: {"items": items, "entries": entries, "at": iso()})
 
     def close_steps(self, iid: int, steps: list[str]):
         """Mark running or failed steps done once the MR has moved past them (status card stays truthful)."""
