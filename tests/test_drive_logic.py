@@ -14,8 +14,9 @@ def samples(rev, ms, n, ok=True, t=10.0):
     return [{"route": "GET /r/{code}", "revision": rev, "ms": ms, "ok": ok, "t": t} for _ in range(n)]
 
 
-def j(s, final=False, need=100):
-    return judge.judge_promise(SPEED, s, "new", "old", need=need, worse=0.2, margin=0.05, final=final, warmup_s=5)
+def j(s, final=False, need=100, warmup_s=0):
+    # these helpers put every visit at one instant: judge them with no warm-up unless a test is about warm-up
+    return judge.judge_promise(SPEED, s, "new", "old", need=need, worse=0.2, margin=0.05, final=final, warmup_s=warmup_s)
 
 
 def test_kept_collecting_broken():
@@ -26,7 +27,7 @@ def test_kept_collecting_broken():
 
 def test_warmup_visits_are_ignored():
     cold = samples("new", 3000, 30, t=1.0)
-    assert j(cold + samples("new", 60, 120))["verdict"] == judge.KEPT
+    assert j(cold + samples("new", 60, 120), warmup_s=5)["verdict"] == judge.KEPT
 
 
 def test_platform_problem_when_old_is_equally_bad():

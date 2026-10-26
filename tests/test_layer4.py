@@ -352,3 +352,31 @@ def test_home_page_and_status_routes_answer(monkeypatch):
     assert client.get("/status/rules").status_code == 200
     monkeypatch.setenv("APP_FLAGS_OFF", "home")
     assert client.get("/").status_code == 404                         # the home page has its own kill switch
+
+
+def test_a_cold_start_at_a_step_is_warm_up_not_a_broken_promise():
+    """r-0028: the new revision's first visits at 10% waited ~4 s for a cold instance; p95 over 129 visits read
+    3.8 s, the release was rolled back and Core went Red. A revision's first seconds of traffic are now warm-up."""
+    from vallum import allowance
+    from vallum.cards import Promise
+    from vallum.drive import judge
+
+    p = Promise("redirect-fast", "speed", {"measure": "p95(latency, route='GET /r/{code}') < 150ms"}, "redirect", "card")
+
+    def visits(rev, start, end, ms, slow_until=None):
+        out, t = [], start
+        while t < end:
+            slow = slow_until is not None and t < slow_until
+            out.append({"revision": rev, "t": t, "route": "GET /r/{code}", "ms": 3800 if slow else ms, "ok": True})
+            t += 0.25
+        return out
+
+    old = visits("old", 0, 60, 55)
+    cold = visits("new", 8, 60, 60, slow_until=12)          # traffic lands at 8 s, the first 4 s are a cold start
+    args = dict(need=100, worse=0.2, margin=0.1, final=True)
+    assert judge.judge_promise(p, old + cold, "new", "old", warmup_s=10, **args)["verdict"] == judge.KEPT
+    assert judge.judge_promise(p, old + cold, "new", "old", warmup_s=0, **args)["verdict"] == judge.BROKEN  # no warm-up
+    slow = visits("new", 8, 60, 3800)                       # a real slip stays slow after the warm-up
+    assert judge.judge_promise(p, old + slow, "new", "old", warmup_s=10, **args)["verdict"] == judge.BROKEN
+    counted = allowance.count(old + cold, {"GET /r/{code}": "core"}, {"GET /r/{code}": 150}, warmup_s=10, blame="new")
+    assert counted["core"]["bad"] == 0                      # cold-start visits don't spend the allowance either

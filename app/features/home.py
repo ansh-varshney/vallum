@@ -9,6 +9,7 @@ from app.ui import esc, nav, page
 
 router = APIRouter()
 
+SOURCE = "https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum"
 HEADLINE = "Short links, shipped with care."
 TAGLINE = ("Paste a long link and get a short one you can share anywhere. Every change to this little app is "
            "test-driven by Vallum before it reaches you.")
@@ -143,6 +144,7 @@ def home(request: Request):
   </section>
 </main>
 <footer class="foot wrap"><span class="badge"><span class="dot" aria-hidden="true"></span>Served by version <span class="mono">{esc(revision)}</span></span>
-<span>Visitors you see in the numbers are simulated during the hackathon.</span></footer>"""
+<span>Visitors you see in the numbers are simulated during the hackathon.</span>
+<a href="{SOURCE}" rel="noopener">Source and every pipeline on GitLab</a></footer>"""
     return HTMLResponse(page("Vallum Links", body, css=CSS, script=SCRIPT),
                         headers={"Cache-Control": "no-store"})

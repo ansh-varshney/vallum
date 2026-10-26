@@ -8,6 +8,7 @@ AT_RISK     close to the limit, or still too little data at the end: rollback (s
 BROKEN      over the limit and at least 20% worse than the old revision: rollback
 """
 
+from vallum.allowance import warmed
 from vallum.cards import Promise
 from vallum.checker.measure import compute, parse_measure, select, within
 
@@ -22,7 +23,7 @@ def blocks(severity: str, tier: str) -> bool:
 def judge_promise(p: Promise, samples: list[dict], new_rev: str, old_rev: str | None, *, need: int,
                   worse: float, margin: float, final: bool, warmup_s: float = 0) -> dict:
     m = parse_measure(p.data["measure"])
-    usable = [s for s in samples if s.get("t", 0) >= warmup_s]
+    usable = warmed(samples, warmup_s)       # each revision's first seconds of traffic are its warm-up
     new = select(usable, m, new_rev)
     old = select(usable, m, old_rev) if old_rev else []
     vn, vo = compute(m, new), compute(m, old)

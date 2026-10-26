@@ -41,14 +41,26 @@ def route_profile(cards: dict, service: dict | None = None) -> tuple[dict, dict]
     return tier_of, limit
 
 
+def warmed(samples: list[dict], warmup_s: float) -> list[dict]:
+    """Drop each revision's first warmup_s seconds of traffic, counted from that revision's own first visit: a
+    new instance's cold start and the traffic switch landing are start-up, not behaviour (r-0028: a ~4 s cold
+    start at 10% read as a broken promise and turned Core Red)."""
+    first = {}
+    for s in samples:
+        rev, t = s.get("revision"), s.get("t", 0)
+        if rev not in first or t < first[rev]:
+            first[rev] = t
+    return [s for s in samples if s.get("t", 0) >= first.get(s.get("revision"), 0) + warmup_s]
+
+
 def count(samples: list[dict], tier_of: dict, limit: dict, slow_factor: float = 2.0, warmup_s: float = 0,
           revision: str | None = None, blame: str | None = None) -> dict:
     """Good and bad visits per tier and app-wide. Bad = failed, or slower than slow_factor x the route's limit.
     `blame`: during a test drive, only bad visits served by that (new) revision count against the allowance;
     the old revision's slow visits under the simulator's load are not the release's fault."""
     out = {t: {"visits": 0, "bad": 0} for t in (*TIERS, "app")}
-    for s in samples:
-        if s.get("t", 0) < warmup_s or (revision is not None and s.get("revision") != revision):
+    for s in warmed(samples, warmup_s):
+        if revision is not None and s.get("revision") != revision:
             continue
         tier = tier_of.get(s.get("route"))
         lim = limit.get(s.get("route"))

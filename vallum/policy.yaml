@@ -51,7 +51,7 @@ gate:
   yellow_max_changed_lines: 200
 
 provenance:
-  allow_owner_push: true           # build phase: the owner's own pushes to main may deploy (recorded as overrides); false for the demo
+  allow_owner_push: false          # demo and after: only Merge Desk merges deploy (true during the build phase: owner pushes deployed, recorded as overrides)
 
 merge_desk: { pipeline_wait_min: 20, rebase_wait_s: 180 }
 
@@ -63,7 +63,7 @@ judge:
   at_risk_margin: 0.05             # within 5% of the limit at the end of a step counts as at risk
   step_retry_s: 5
   tick_s: 10
-  warmup_s: 5
+  warmup_s: 10                  # each revision's first seconds of traffic at a step are not judged (cold start, switch landing)
 
 simulate:
   links: 120                       # persistent "real" links, popularity follows a Zipf curve
