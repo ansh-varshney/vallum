@@ -1,0 +1,8 @@
+id: popular-redirects-fast
+learned_from: "incident #11"
+type: speed
+says: "Redirects of popular links stay under 150 ms on every revision, including a push that skipped the Merge Desk"
+measure: "p95(latency, route='GET /r/{code}', popular == 1) < 150ms"
+replay: true
+where: [mr, drive, live]
+severity: blocker
