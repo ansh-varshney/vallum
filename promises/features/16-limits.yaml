@@ -1,0 +1,73 @@
+# Feature Card: link limits, shows API users the maximum URL and code lengths.
+feature: limits
+issue: 16
+kind: new-endpoint
+tier: standard
+priority: P2
+owns:
+  routes: ["GET /api/limits"]
+  files: [app/features/limits.py, tests/test_limits.py]
+flag: limits
+promises:
+  behavior:
+    - id: limits-returns-constants
+      says: "The limits endpoint returns the correct max URL and code length constants"
+      steps:
+        - "GET /api/limits -> 200 json max_url_length=2048 json max_code_length=64"
+      where: [mr, drive, live]
+      severity: blocker
+    - id: limits-public-no-key
+      says: "The limits endpoint works without an API key"
+      steps:
+        - "anon GET /api/limits -> 200 json max_url_length=2048 json max_code_length=64"
+      where: [mr, drive, live]
+      severity: blocker
+  speed:
+    - id: limits-fast
+      says: "95% of limit queries finish in under 300 ms"
+      measure: "p95(latency, route='GET /api/limits') < 300ms"
+      where: [mr, drive, live]
+      severity: major
+  reliability:
+    - id: limits-reliable
+      says: "Fewer than 0.5% of limit queries fail"
+      measure: "error_rate(route='GET /api/limits') < 0.5%"
+      where: [mr, drive, live]
+      severity: blocker
+  security:
+    - id: limits-no-api-key-required
+      says: "The limits endpoint is public and does not require an API key"
+      steps: ["GET /api/limits -> 200"]
+      where: [mr, drive]
+      severity: blocker
+    - id: limits-no-secrets
+      says: "The limits module never reads or exposes secrets"
+      static: {file_lacks: [app/features/limits.py, "vallum_secrets"]}
+      where: [mr, drive]
+      severity: blocker
+    - id: limits-no-ip-logging
+      says: "The limits endpoint does not log visitor IP addresses"
+      static: {file_lacks: [app/features/limits.py, "request.client"]}
+      where: [mr, drive]
+      severity: major
+    - id: limits-constant-response
+      says: "The limits endpoint returns constant values without reading user data"
+      steps: ["GET /api/limits -> 200 contains max_url_length"]
+      where: [mr, drive]
+      severity: blocker
+    - id: limits-no-request-body
+      says: "The limits endpoint ignores request bodies"
+      steps: ["POST /api/limits {data: 'test'} -> 405"]
+      where: [mr, drive]
+      severity: major
+    - id: limits-no-path-parameters
+      says: "The limits endpoint has no path parameters to validate"
+      steps: ["GET /api/limits/extra -> 404"]
+      guard: true
+      where: [mr, drive]
+      severity: major
+    - id: limits-no-query-parameters
+      says: "The limits endpoint ignores query parameters"
+      steps: ["GET /api/limits?param=value -> 200"]
+      where: [mr, drive]
+      severity: major
