@@ -19,12 +19,13 @@ A link shortener for small businesses: create short links, redirect visitors, se
 |---|---|---|---|---|---|---|
 | custom-alias | standard | new-endpoint | `POST /api/aliases` | `app/features/custom_alias.py`<br>`tests/test_custom_alias.py` | custom_alias | behavior: alias-redirects, alias-taken-is-refused, alias-valid-chars-only, alias-url-must-be-http, alias-url-length-limit, alias-create-needs-key, alias-response-shape; reliability: alias-create-reliable; security: alias-sec-needs-key, alias-chars-only, alias-max-length, alias-no-path-traversal, alias-url-http-only, alias-url-no-ftp, alias-url-max-length, alias-no-secrets, alias-no-open-redirect; speed: alias-create-fast |
 | health | standard | config-infra | `GET /health` | `app/features/health.py` | - | cost: health-no-store; operability: health-reports-revision; speed: health-fast |
+| home | standard | ui-page | `GET /` | `app/features/home.py`<br>`app/ui.py` | home | behavior: home-renders, home-shows-version; security: home-no-secrets; speed: home-fast |
 | link-exists | standard | new-endpoint | `GET /api/links/{code}/exists` | `app/features/link_exists.py`<br>`tests/test_link_exists.py` | link_exists | behavior: link-exists-true, link-exists-false, link-exists-no-url, link-exists-odd-code; reliability: link-exists-reliable; security: link-exists-no-url-leak, link-exists-odd-codes-safe, link-exists-long-codes-safe, link-exists-no-secrets, link-exists-public-no-key; speed: link-exists-fast |
 | link-preview | experimental | ui-page | `GET /p/{code}` | `app/features/link_preview.py`<br>`tests/test_link_preview.py` | link_preview | behavior: link-preview-shows-destination, link-preview-unknown-404, link-preview-no-secrets, link-preview-odd-code-404; security: preview-no-secrets, preview-no-api-key, preview-rejects-odd-codes, preview-html-escapes-destination; speed: link-preview-fast |
 | links | standard | new-endpoint | `POST /api/links`<br>`GET /api/links/{code}`<br>`DELETE /api/links/{code}` | `app/features/links.py` | - | behavior: link-create-read, link-delete; reliability: link-api-reliable; security: link-create-needs-key, link-http-only, link-url-well-formed; speed: link-details-fast |
 | redirect | core | new-endpoint | `GET /r/{code}` | `app/features/redirect.py` | - | behavior: redirect-works, redirect-unknown-404; reliability: redirect-reliable; security: redirect-rejects-odd-codes; speed: redirect-fast |
 | redirect-old-links | core | bug-fix | `GET /r/{code}` | `tests/test_redirect.py` | - | behavior: redirect-old-links-still-work |
-| status-page | standard | ui-page | `GET /status` | `app/features/status.py` | - | behavior: status-renders, status-shows-promises; security: status-no-secrets; speed: status-fast |
+| status-page | standard | ui-page | `GET /status`<br>`GET /status/rules`<br>`GET /status/live.json` | `app/features/status.py`<br>`app/ui.py` | - | behavior: status-renders, status-shows-promises, status-rules-page, status-live-feed; security: status-no-secrets; speed: status-fast |
 | version | standard | new-endpoint | `GET /api/version` | `app/features/version.py` | version | behavior: version-shows-revision; reliability: version-reliable; security: version-no-secrets; speed: version-fast |
 
 ## Modules
@@ -41,6 +42,10 @@ A link shortener for small businesses: create short links, redirect visitors, se
 ### `app/features/health.py` (python, 11 lines) · feature **health**
 - route `GET /health -> health()`
 - def `health(request) :9`
+
+### `app/features/home.py` (python, 149 lines) · feature **home**
+- route `GET / -> home()`
+- def `home(request) :102`
 
 ### `app/features/link_exists.py` (python, 22 lines) · feature **link-exists**
 - route `GET /api/links/{code}/exists -> link_exists()`
@@ -64,17 +69,25 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - route `GET /r/{code} -> follow()`
 - def `follow(code, request) :15`
 
-### `app/features/status.py` (python, 252 lines) · feature **status-page**
+### `app/features/status.py` (python, 508 lines) · feature **status-page**
 - route `GET /status -> status_page()`
-- def `esc(value) :33`
-- def `when(value) :37`
-- def `tiers_html(modes, window) :53`
-- def `release_html(release, meta, queue, breaker) :72`
-- def `features_html(public, switches) :125`
-- def `security_html(sec) :155`
-- def `events_html(events, project_url) :170`
-- def `render(data, revision) :219`
-- def `status_page(request) :249`
+- route `GET /status/live.json -> live_json()`
+- route `GET /status/rules -> rules_page()`
+- def `when(value) :50`
+- def `tiers_html(modes, window) :67`
+- def `release_text(release) :87`
+- def `queue_html(queue, project_url) :102`
+- def `release_html(release, meta, queue, breaker, project_url) :121`
+- def `features_html(public, switches) :163`
+- def `security_html(sec) :213`
+- def `events_html(events, project_url) :228`
+- def `overall(data, live) :245`
+- def `live_payload(store, data) :387`
+- def `render(data, revision, live) :394`
+- def `status_page(request) :436`
+- def `live_json(request) :444`
+- def `render_rules(docs, revision, project_url) :465`
+- def `rules_page(request) :502`
 
 ### `app/features/version.py` (python, 13 lines) · feature **version**
 - route `GET /api/version -> version()`
@@ -104,11 +117,19 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - def `log(severity, message) :22`
 - def `log_request(method, route, status, ms, revision) :26`
 
+### `app/ui.py` (python, 170 lines) · feature **status-page**
+- def `esc(value) :54`
+- def `page(title, body) :58`
+- def `nav(active, revision) :66`
+- def `markdown(text, link_base) :93`
+- def `yaml_html(text) :157`
+
 ## Routes
 
 | Route | Defined in | Feature |
 |---|---|---|
 | `DELETE /api/links/{code}` | `app/features/links.py` | links |
+| `GET /` | `app/features/home.py` | home |
 | `GET /api/links/{code}` | `app/features/links.py` | links |
 | `GET /api/links/{code}/exists` | `app/features/link_exists.py` | link-exists |
 | `GET /api/version` | `app/features/version.py` | version |
@@ -116,6 +137,8 @@ A link shortener for small businesses: create short links, redirect visitors, se
 | `GET /p/{code}` | `app/features/link_preview.py` | link-preview |
 | `GET /r/{code}` | `app/features/redirect.py` | redirect |
 | `GET /status` | `app/features/status.py` | status-page |
+| `GET /status/live.json` | `app/features/status.py` | status-page |
+| `GET /status/rules` | `app/features/status.py` | status-page |
 | `POST /api/aliases` | `app/features/custom_alias.py` | custom-alias |
 | `POST /api/links` | `app/features/links.py` | links |
 
@@ -133,7 +156,7 @@ A link shortener for small businesses: create short links, redirect visitors, se
 - `tests/test_gitlab_client.py`: 2 test(s)
 - `tests/test_layer2.py`: 12 test(s)
 - `tests/test_layer3.py`: 71 test(s)
-- `tests/test_layer4.py`: 10 test(s)
+- `tests/test_layer4.py`: 15 test(s)
 - `tests/test_link_exists.py`: 12 test(s)
 - `tests/test_link_preview.py`: 10 test(s)
 - `tests/test_redirect.py`: 5 test(s)
