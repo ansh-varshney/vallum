@@ -17,3 +17,8 @@ Owner-written.
   to it). So a promise that expects 404 also passes on main: mark it `guard: true`. At least one promise per
   feature must not be a guard.
 - Never write a flag-off (kill switch) promise; the checker can't switch flags. The Builder's tests cover it.
+- A change to text only (a headline, a label, wording) needs ONE behavior promise for the new text and nothing
+  else: the page's existing promises already cover rendering and secrets. Never add a security or "escaping"
+  promise for it (!38: such a promise used the same check as the headline promise, could never fail, and GitLab
+  Duo rightly asked for changes).
+- Never write a promise whose check could not fail, for example the same steps as another promise.
