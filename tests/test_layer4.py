@@ -452,3 +452,13 @@ def test_every_sub_agent_prints_the_flight_directors_task():
         c = comps[sub["name"]]
         assert {"from": "context:goal", "as": "goal"} in c["inputs"], sub["name"]
         assert "{{ goal }}" in prompts[c["prompt_id"]]["prompt_template"]["user"], sub["name"]
+
+
+def test_the_release_captain_finds_its_item_by_the_release_record():
+    """Session 10074394: the goal was the bare number 16; issue #16 and MR !16 both exist, the Captain asked which
+    one and left the issue open."""
+    import yaml
+
+    flow = yaml.safe_load(open(".gitlab/duo/flows/release.yaml", encoding="utf-8"))
+    user = flow["prompts"][0]["prompt_template"]["user"]
+    assert "Release record" in user and "issue with that number first" in user and "Never stop to ask" in user

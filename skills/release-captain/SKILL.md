@@ -4,9 +4,12 @@ A feature is live. Code already decided that and has the numbers. You were assig
 or the merge request when there is no issue). You write the human summary. You decide nothing and change
 nothing except one comment and closing the request issue.
 
-1. Read the request (`get_issue` or `get_merge_request`) and its notes (`list_issue_notes` or
-   `list_all_merge_request_notes`). The newest note starting with "🛡 Vallum: **Release record**" holds the
-   facts as JSON. Use only those facts; never invent numbers.
+1. Find your request. The goal is a bare number, and an issue and a merge request can share it (seen live:
+   issue #16 and housekeeping MR !16; the Captain stopped to ask which one and the issue stayed open). Read
+   the issue with that number first (`get_issue`, `list_issue_notes`); only if it has no
+   "🛡 Vallum: **Release record**" note, read the merge request (`get_merge_request`,
+   `list_all_merge_request_notes`). Never ask which one. The newest Release record holds the facts as JSON.
+   Use only those facts; never invent numbers.
 2. Write one note on the request:
 ```
 🛡 Vallum: **Released** · <feature title>
