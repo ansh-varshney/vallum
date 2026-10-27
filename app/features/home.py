@@ -10,7 +10,7 @@ from app.ui import CONTROL_ROOM, esc, header, page
 router = APIRouter()
 
 SOURCE = "https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum"
-HEADLINE = "Short links, shipped with care."
+HEADLINE = "Short links you can trust"
 TAGLINE = ("Paste a long link and get a short one you can share anywhere. Every change to this little app is "
            "test-driven by Vallum before it reaches you.")
 
