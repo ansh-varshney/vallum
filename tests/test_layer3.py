@@ -1229,3 +1229,13 @@ def test_an_owner_decision_goes_to_the_builder_not_the_medic(monkeypatch):
     assert desk.escalated(mr) is False                                         # the owner removed the label
     assert desk.owner_decided(mr) is True and started == [("fix", "ship", "fix")]
     assert desk.owner_decided(mr) is False and len(started) == 1               # once per release
+
+
+def test_the_watcher_fingerprint_has_no_array_inside_an_array():
+    """Regression (!37): Firestore refused the watcher's state ("Property mrs contains an invalid nested entity")
+    because the reviewers were a list inside the fingerprint list, so the desk was not re-run after the Inspector."""
+    from vallum.watch import fingerprint
+
+    fp = fingerprint({"sha": "abc", "detailed_merge_status": "not_approved", "labels": ["vallum"],
+                      "reviewers": [{"id": 9}, {"id": 5}], "user_notes_count": 4}, "vallum::needs-human", "success")
+    assert not any(isinstance(v, (list, tuple, dict)) for v in fp) and fp[3] == "5,9"

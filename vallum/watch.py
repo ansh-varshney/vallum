@@ -22,8 +22,11 @@ RUNNING = {"created", "pending", "running", "waiting_for_resource", "preparing",
 
 def fingerprint(mr: dict, needs_human: str, pipeline: str | None = None) -> list:
     # user_notes_count: a new verdict or comment (the desk's next step often waits on one)
+    # flat values only: Firestore refuses an array inside an array ("invalid nested entity", seen live on !37,
+    # which stopped the watcher from re-running the desk after the Inspector's verdict)
+    reviewers = ",".join(str(r.get("id")) for r in sorted(mr.get("reviewers") or [], key=lambda r: str(r.get("id"))))
     return [mr.get("sha"), mr.get("detailed_merge_status"), needs_human in (mr.get("labels") or []),
-            sorted(r.get("id") for r in mr.get("reviewers") or []), pipeline, mr.get("user_notes_count")]
+            reviewers, pipeline, mr.get("user_notes_count")]
 
 
 class Watcher:
