@@ -20,6 +20,11 @@ promises:
       steps: ["GET / -> 200 contains Served by version"]
       where: [mr, drive, live]
       severity: minor
+    - id: home-headline-trusted
+      says: "The home page displays the new headline about trust"
+      steps: ["GET / -> 200 contains Short links you can trust"]
+      where: [mr, drive, live]
+      severity: major
   speed:
     - id: home-fast
       says: "95% of home page loads finish in under 500 ms"
