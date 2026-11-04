@@ -3,17 +3,22 @@
 This guide sets up the full hands-off loop in **your own GitLab project and Google Cloud project**: a member
 moves an issue to *In progress*, agents build the change, and code merges, test-drives, releases and watches it.
 
+It is the only way to see the loop run live. The original
+[GitLab project](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum) sits in a
+hackathon group that was archived after the deadline: it is read-only, its schedule stopped on 27 Oct 2026 and
+its flows can't run. Browse it for the record of every real run, and clone it as your starting point.
+
 Everything here is taken from the code in this repository. Items marked **(check)** could not be confirmed
 from the code alone; confirm them in your GitLab or Google Cloud settings.
 
 > Only want to look around? You don't need any of this. See **Start here** in the [README](README.md):
-> watch the real runs on GitLab, or run the app, the control room and the 231 tests locally in 5 minutes.
+> browse the archive of real runs on GitLab, or run the app, the control room and the 231 tests locally in 5 minutes.
 
 ## 1. What you need
 
 | Need | Why | Notes |
 |---|---|---|
-| A **GitLab.com** project with **GitLab Duo Agent Platform** | The 6 agent flows (`.gitlab/duo/flows/`) run on it | Premium or Ultimate, or Free with purchased GitLab Credits ([docs](https://docs.gitlab.com/ee/user/duo_agent_platform/)) |
+| A **GitLab.com** project with **GitLab Duo Agent Platform** | The 6 agent flows (`.gitlab/duo/flows/`) run on it | Premium or Ultimate (a trial works), or Free with purchased GitLab Credits ([docs](https://docs.gitlab.com/ee/user/duo_agent_platform/)) |
 | **Owner or Maintainer** role on that project | CI/CD variables, the approval rule, branch protection | Vallum was built with only Developer; see the table below |
 | A **Google Cloud** project with billing on | Cloud Run (the app and the control room), Artifact Registry, Firestore | Idle cost is close to zero (section 9) |
 | Locally: **Python 3.12**, `git`, the `gcloud` CLI | Tests, setup commands | |

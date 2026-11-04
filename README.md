@@ -2,13 +2,14 @@
 
 > **Start here.** This GitHub repository is a copy of the
 > [GitLab project](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum) where Vallum
-> runs live and was judged. The agents run on GitLab Duo Agent Platform, so the hands-off loop itself lives there.
+> ran live and was judged. The hackathon group was archived after the deadline, so that project is now a
+> **read-only archive**: nothing has run there since 27 Oct 2026, and nobody (the owner included) can trigger it.
 >
 > | You want to… | Go to |
 > |---|---|
-> | **See it work** | Every real run on GitLab: [pipelines](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines), [merge requests built by agents](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests?state=merged), [incident #5 → learned promise](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/5), the [Ledger](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3). Live: [the app](https://vallum-256944994567.us-central1.run.app/) and [the control room](https://vallum-status-256944994567.us-central1.run.app/) (up at least through judging, 14 Nov 2026) |
+> | **See it work** | Browse or clone the archive of every real run: [pipelines](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines), [merge requests built by agents](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests?state=merged), [incident #5 → learned promise](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/5), the [Ledger](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3). The deployed [app](https://vallum-256944994567.us-central1.run.app/) and [control room](https://vallum-status-256944994567.us-central1.run.app/) stay up through judging (ends 14 Nov 2026) and at least until 20 Jan 2027; their state is frozen at 27 Oct |
 > | **Try it locally in 5 minutes** | [Run it locally](#run-it-locally): the 231 tests, the app and the control room, no cloud needed |
-> | **Run your own** | [SETUP.md](SETUP.md): the full loop in your own GitLab project and Google Cloud project |
+> | **See the loop run live** | [SETUP.md](SETUP.md): the only way now is your own GitLab project (Duo Agent Platform) and Google Cloud project |
 
 **A hands-off release guardian on GitLab Duo Agent Platform.** Vallum ships a requested feature to
 production by itself, but only if the feature keeps its promises, and only as boldly as its mistake
