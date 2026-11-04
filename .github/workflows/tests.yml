@@ -1,0 +1,25 @@
+# Runs Vallum's unit tests on GitHub. GitHub ignores .gitlab-ci.yml: the real pipeline (promise checker,
+# Gatekeeper, provenance gate, test drive on Cloud Run, Live Patrol) is GitLab CI, on the GitLab project.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-vallum.txt
+      - run: pip install -r requirements.txt -r requirements-vallum.txt
+      - run: pytest
