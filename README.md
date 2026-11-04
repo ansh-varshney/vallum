@@ -25,7 +25,8 @@ Built for the GitLab Transcend "Life After Code" hackathon (Path A, Hands-off).
 - **The Ledger** (Vallum's state, rewritten by code): [issue #3](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3)
 - **Every run, in the open**: [pipelines](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines)
 
-> Status: **Layers 1–3 passed live** (21–25 Oct), Layer 4 in progress. Layer 1 is the safe skeleton (promise
+> Status at the end of the hackathon (27 Oct 2026): **all four layers built and running live**; Layers 1–3
+> passed their live tests on 21–25 Oct, and the final end-to-end run shipped #20 with zero human steps. Layer 1 is the safe skeleton (promise
 > checker, Gatekeeper, Merge Desk, deploy provenance gate, test drive on Cloud Run, state store, Notifier,
 > Watchdog, visitor simulation). Layer 2 adds the agents: GitLab Duo flows published from this repo, with code
 > still deciding what ships. Layer 3 adds judgment (mistake allowances and modes, scoped freezes, `@vallum`
