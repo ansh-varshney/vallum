@@ -1,5 +1,15 @@
 # 🛡 Vallum
 
+> **Start here.** This GitHub repository is a copy of the
+> [GitLab project](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum) where Vallum
+> runs live and was judged. The agents run on GitLab Duo Agent Platform, so the hands-off loop itself lives there.
+>
+> | You want to… | Go to |
+> |---|---|
+> | **See it work** | Every real run on GitLab: [pipelines](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/pipelines), [merge requests built by agents](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/merge_requests?state=merged), [incident #5 → learned promise](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/5), the [Ledger](https://gitlab.com/gitlab-ai-hackathon/transcend-october-2026/43503198/vallum/-/work_items/3). Live: [the app](https://vallum-256944994567.us-central1.run.app/) and [the control room](https://vallum-status-256944994567.us-central1.run.app/) (up at least through judging, 14 Nov 2026) |
+> | **Try it locally in 5 minutes** | [Run it locally](#run-it-locally): the 231 tests, the app and the control room, no cloud needed |
+> | **Run your own** | [SETUP.md](SETUP.md): the full loop in your own GitLab project and Google Cloud project |
+
 **A hands-off release guardian on GitLab Duo Agent Platform.** Vallum ships a requested feature to
 production by itself, but only if the feature keeps its promises, and only as boldly as its mistake
 allowance permits. Agents write code, promises and explanations; **code decides what ships**.
@@ -186,11 +196,49 @@ Registry, Firestore (app data and the state store), and Workload Identity Federa
 
 ## Run it locally
 
+No Google Cloud and no GitLab needed: the app and the control room use an in-memory store
+(`APP_STORE=memory`). The variables are also in [`.env.example`](.env.example). Needs Python 3.12.
+
 ```bash
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt -r requirements-vallum.txt
-pytest
-APP_STORE=memory APP_API_KEY=dev uvicorn app.main:app --reload
+pytest                               # 231 tests
 ```
+
+The app (the link shortener) on <http://127.0.0.1:8000>:
+
+```bash
+APP_STORE=memory APP_API_KEY=dev CONTROL_ROOM_URL=http://127.0.0.1:8001 \
+  uvicorn app.main:app --port 8000 --reload
+```
+
+Create a link and follow it (write endpoints need the key in `X-API-Key`):
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/links -H "X-API-Key: dev" \
+  -H "Content-Type: application/json" -d '{"url": "https://example.com"}'
+curl -i http://127.0.0.1:8000/r/<code>    # 302 to https://example.com
+```
+
+The control room on <http://127.0.0.1:8001>, in a second terminal. With an empty in-memory store its pages
+render without releases or history; on Cloud Run it reads Vallum's state store.
+
+```bash
+APP_STORE=memory APP_URL=http://127.0.0.1:8000 uvicorn control.main:app --port 8001
+```
+
+With Docker, one image runs either service (`APP_MODULE` picks it; the container listens on 8080):
+
+```bash
+docker build -t vallum .
+docker run --rm -p 8000:8080 -e APP_STORE=memory -e APP_API_KEY=dev \
+  -e CONTROL_ROOM_URL=http://127.0.0.1:8001 vallum
+docker run --rm -p 8001:8080 -e APP_STORE=memory -e APP_MODULE=control.main:app \
+  -e APP_URL=http://127.0.0.1:8000 vallum
+```
+
+Kill switches can be turned off locally with `APP_FLAGS_OFF`, e.g. `APP_FLAGS_OFF=custom_alias,link_preview`.
 
 ## License
 
