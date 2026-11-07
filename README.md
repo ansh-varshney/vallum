@@ -12,7 +12,7 @@ Vallum was built for the GitLab Transcend "Life After Code" hackathon (Path A, H
 | Resource | Link |
 |---|---|
 | Demo video (3 minutes) | [Watch the demo on Google Drive](https://drive.google.com/file/d/1LLNN9HmcxLzJdIcDBS9TWPDxDEKhoncI/view?usp=sharing) |
-| Presentation slides (PDF) | *To be added.* <!-- Upload the PDF as docs/Vallum-slides.pdf, then replace "*To be added.*" with: [Vallum-slides.pdf](docs/Vallum-slides.pdf) --> |
+| Presentation slides | [View the slides on Google Drive](https://drive.google.com/file/d/1NWmwFVARgJ5vuktKT_T4IjKkGhZpz3Ih/view?usp=sharing) |
 
 ## About this repository
 
